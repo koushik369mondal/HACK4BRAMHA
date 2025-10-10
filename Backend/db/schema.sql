@@ -52,10 +52,6 @@ CREATE POLICY "Users can insert their own profile" ON user_profiles
 CREATE POLICY "Users can update their own profile" ON user_profiles
     FOR UPDATE USING (auth.uid() = user_id);
 
--- Allow users to update their own profiles
-CREATE POLICY "Users can update their own profile" ON user_profiles
-    FOR UPDATE USING (auth.uid() = user_id);
-
 -- ============================================================================
 -- 3. MAIN COMPLAINT SYSTEM TABLES
 -- ============================================================================
