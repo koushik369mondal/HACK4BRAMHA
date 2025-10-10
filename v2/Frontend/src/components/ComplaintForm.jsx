@@ -19,7 +19,7 @@ import {
   FaSearchLocation
 } from "react-icons/fa";
 
-// Simplified Aadhaar Verification
+// Simplified Aadhaar Verification Component
 const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
@@ -45,8 +45,7 @@ const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
     setError('');
 
     try {
-      // Reduced verification time
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const mockData = {
         name: 'John Doe',
@@ -68,6 +67,13 @@ const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
     }
   }, [aadhaarNumber, onVerificationComplete]);
 
+  const handleReset = useCallback(() => {
+    setIsVerified(false);
+    setAadhaarNumber('');
+    setError('');
+    onVerificationComplete?.({ success: false });
+  }, [onVerificationComplete]);
+
   return (
     <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -87,7 +93,7 @@ const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
           type="text"
           value={isVerified ? `****-****-${aadhaarNumber.slice(-4)}` : aadhaarNumber}
           onChange={handleAadhaarChange}
-          placeholder="1234 5678 9012"
+          placeholder="Enter 12-digit Aadhaar"
           className={`flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 ${isVerified ? 'border-green-500 bg-green-50' :
               error ? 'border-red-500 bg-red-50' : 'border-gray-300'
             }`}
@@ -97,11 +103,7 @@ const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
 
         <button
           type="button"
-          onClick={isVerified ? () => {
-            setIsVerified(false);
-            setAadhaarNumber('');
-            onVerificationComplete?.({ success: false });
-          } : handleVerification}
+          onClick={isVerified ? handleReset : handleVerification}
           disabled={isVerifying || (!isVerified && aadhaarNumber.length !== 12)}
           className={`px-4 py-2 text-white rounded-md font-medium transition-colors min-w-[100px] ${isVerified ? 'bg-gray-600 hover:bg-gray-700' :
               'bg-green-600 hover:bg-green-700 disabled:bg-gray-400'
@@ -128,6 +130,8 @@ const AadhaarVerification = React.memo(({ onVerificationComplete }) => {
   );
 });
 
+AadhaarVerification.displayName = 'AadhaarVerification';
+
 // Enhanced Location Picker with Mapbox Integration
 const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
   const [address, setAddress] = useState('');
@@ -138,78 +142,108 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
   const map = useRef(null);
   const marker = useRef(null);
 
-  // Initialize Mapbox
+  // Initialize Mapbox with proper cleanup
   useEffect(() => {
-    if (showMap && mapContainer.current && !map.current) {
-      // Set Mapbox access token
-      mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+    if (!showMap || !mapContainer.current || map.current) return;
 
-      // Initialize map
-      map.current = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: [91.7362, 26.1445], // Guwahati coordinates
-        zoom: 12
-      });
+    // Set Mapbox access token
+    const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 
-      // Add navigation controls
-      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
-
-      // Add click event listener for location selection
-      map.current.on('click', (e) => {
-        const { lng, lat } = e.lngLat;
-        
-        // Remove existing marker
-        if (marker.current) {
-          marker.current.remove();
-        }
-
-        // Add new marker
-        marker.current = new mapboxgl.Marker({ color: '#dc2626' })
-          .setLngLat([lng, lat])
-          .addTo(map.current);
-
-        // Update coordinates
-        setCoordinates({ lat, lng });
-
-        // Reverse geocoding to get address
-        reverseGeocode(lng, lat);
-      });
-
-      // Handle geolocation
-      map.current.addControl(
-        new mapboxgl.GeolocateControl({
-          positionOptions: {
-            enableHighAccuracy: true
-          },
-          trackUserLocation: true,
-          showUserHeading: true,
-          showAccuracyCircle: false
-        }),
-        'top-right'
-      );
+    if (!accessToken) {
+      console.error('Mapbox access token not found');
+      return;
     }
 
-    return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
+    mapboxgl.accessToken = accessToken;
+
+    // Initialize map
+    const mapInstance = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [91.7362, 26.1445], // Guwahati coordinates
+      zoom: 12
+    });
+
+    map.current = mapInstance;
+
+    // Add navigation controls
+    mapInstance.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    // Add click event listener for location selection
+    const handleMapClick = (e) => {
+      const { lng, lat } = e.lngLat;
+
+      // Remove existing marker
+      if (marker.current) {
+        marker.current.remove();
       }
+
+      // Add new marker
+      marker.current = new mapboxgl.Marker({ color: '#dc2626' })
+        .setLngLat([lng, lat])
+        .addTo(mapInstance);
+
+      // Update coordinates
+      setCoordinates({ lat, lng });
+
+      // Reverse geocoding to get address
+      reverseGeocode(lng, lat);
+    };
+
+    mapInstance.on('click', handleMapClick);
+
+    // Add geolocation control
+    mapInstance.addControl(
+      new mapboxgl.GeolocateControl({
+        positionOptions: {
+          enableHighAccuracy: true
+        },
+        trackUserLocation: true,
+        showUserHeading: true,
+        showAccuracyCircle: false
+      }),
+      'top-right'
+    );
+
+    // Cleanup function
+    return () => {
+      if (marker.current) {
+        marker.current.remove();
+        marker.current = null;
+      }
+      if (mapInstance) {
+        mapInstance.remove();
+      }
+      map.current = null;
     };
   }, [showMap]);
 
   // Reverse geocoding function
   const reverseGeocode = async (lng, lat) => {
+    const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+
+    if (!accessToken) {
+      const fallbackAddress = `Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      setAddress(fallbackAddress);
+      onLocationSelect?.({
+        address: fallbackAddress,
+        latitude: lat,
+        longitude: lng,
+        formatted: fallbackAddress
+      });
+      return;
+    }
+
     try {
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${import.meta.env.VITE_MAPBOX_ACCESS_TOKEN}`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${accessToken}`
       );
       const data = await response.json();
-      
+
       if (data.features && data.features.length > 0) {
         const place = data.features[0];
         const locationAddress = place.place_name || `Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
-        
+
         setAddress(locationAddress);
         onLocationSelect?.({
           address: locationAddress,
@@ -217,6 +251,8 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
           longitude: lng,
           formatted: locationAddress
         });
+      } else {
+        throw new Error('No address found');
       }
     } catch (error) {
       console.error('Reverse geocoding failed:', error);
@@ -233,7 +269,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
 
   const handleCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      alert('Geolocation not supported');
+      alert('Geolocation not supported by your browser');
       return;
     }
 
@@ -241,7 +277,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        
+
         setCoordinates({ lat: latitude, lng: longitude });
 
         // If map is shown, update map view and marker
@@ -266,46 +302,43 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
         reverseGeocode(longitude, latitude);
         setIsLoading(false);
       },
-      () => {
-        alert('Could not get your location');
+      (error) => {
+        console.error('Geolocation error:', error);
+        alert('Could not get your location. Please check permissions.');
         setIsLoading(false);
       },
-      { timeout: 5000 }
+      { timeout: 10000, enableHighAccuracy: true }
     );
   }, []);
 
   const handleAddressChange = useCallback((e) => {
     const value = e.target.value;
     setAddress(value);
+  }, []);
 
-    if (value.trim()) {
-      // Mock coordinates for any address (you could integrate geocoding here)
-      const lat = 26.1445 + (Math.random() - 0.5) * 0.1;
-      const lng = 91.7362 + (Math.random() - 0.5) * 0.1;
+  const geocodeAddress = async (searchAddress) => {
+    const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 
-      setCoordinates({ lat, lng });
-      onLocationSelect?.({
-        address: value,
-        latitude: lat,
-        longitude: lng,
-        formatted: value
-      });
+    if (!accessToken) {
+      alert('Mapbox configuration error. Please use Current Location button.');
+      return;
     }
-  }, [onLocationSelect]);
 
-  const geocodeAddress = async (address) => {
+    setIsLoading(true);
+
     try {
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${import.meta.env.VITE_MAPBOX_ACCESS_TOKEN}&country=IN`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchAddress)}.json?access_token=${accessToken}&country=IN&limit=1`
       );
       const data = await response.json();
-      
+
       if (data.features && data.features.length > 0) {
         const place = data.features[0];
         const [lng, lat] = place.center;
-        
+
         setCoordinates({ lat, lng });
-        
+        setAddress(place.place_name);
+
         // Update map if shown
         if (map.current) {
           map.current.flyTo({
@@ -330,9 +363,14 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
           longitude: lng,
           formatted: place.place_name
         });
+      } else {
+        alert('Location not found. Please try a different address or use Current Location.');
       }
     } catch (error) {
       console.error('Geocoding failed:', error);
+      alert('Failed to search location. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -344,7 +382,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex space-x-3">
+      <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
         <input
           type="text"
           value={address}
@@ -359,7 +397,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
           type="button"
           onClick={handleAddressSearch}
           disabled={disabled || isLoading || !address.trim()}
-          className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           <FaSearchLocation />
           Search
@@ -369,7 +407,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
           type="button"
           onClick={handleCurrentLocation}
           disabled={disabled || isLoading}
-          className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isLoading ? (
             <FaSpinner className="animate-spin" />
@@ -386,7 +424,7 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
           type="button"
           onClick={() => setShowMap(!showMap)}
           disabled={disabled}
-          className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors flex items-center gap-2"
+          className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
         >
           <FaMapMarkerAlt />
           {showMap ? 'Hide Map' : 'Show Interactive Map'}
@@ -401,8 +439,8 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
               Click on the map to select a location, or use the location controls
             </p>
           </div>
-          <div 
-            ref={mapContainer} 
+          <div
+            ref={mapContainer}
             className="w-full h-96"
             style={{ minHeight: '384px' }}
           />
@@ -412,27 +450,25 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
       {/* Selected Location Display */}
       {coordinates.lat && coordinates.lng && (
         <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
-          <div className="flex items-center space-x-2">
-            <FaMapMarkerAlt className="w-5 h-5 text-green-600" />
-            <div className="flex-1">
+          <div className="flex items-start space-x-2">
+            <FaMapMarkerAlt className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-green-800">Location Selected</p>
-              <p className="text-sm text-green-700">{address}</p>
+              <p className="text-sm text-green-700 break-words">{address}</p>
               <p className="text-xs text-green-600">
                 Coordinates: {coordinates.lat.toFixed(6)}, {coordinates.lng.toFixed(6)}
               </p>
             </div>
-            {showMap && (
+            {showMap && map.current && (
               <button
                 type="button"
                 onClick={() => {
-                  if (map.current) {
-                    map.current.flyTo({
-                      center: [coordinates.lng, coordinates.lat],
-                      zoom: 16
-                    });
-                  }
+                  map.current.flyTo({
+                    center: [coordinates.lng, coordinates.lat],
+                    zoom: 16
+                  });
                 }}
-                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors flex-shrink-0"
               >
                 Center Map
               </button>
@@ -444,7 +480,9 @@ const LocationPicker = React.memo(({ onLocationSelect, disabled }) => {
   );
 });
 
-// FIXED Form Field Component [web:267][web:268]
+LocationPicker.displayName = 'LocationPicker';
+
+// Form Field Component
 const FormField = React.memo(({
   label,
   type = "text",
@@ -460,15 +498,16 @@ const FormField = React.memo(({
   rows,
   options = []
 }) => {
-  // Fix: Properly handle different element types [web:267][web:268]
   const renderElement = () => {
+    const baseClassName = `w-full px-4 py-3 bg-white border rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 transition-all duration-200 ${error ? 'border-red-500 bg-red-50 focus:ring-red-200' : 'border-gray-300 focus:ring-green-200 focus:border-green-500'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
+
     if (as === "select") {
       return (
         <select
           value={value}
           onChange={onChange}
-          className={`w-full px-4 py-3 bg-white border rounded-lg text-gray-900 focus:outline-none focus:ring-2 transition-all duration-200 ${error ? 'border-red-500 bg-red-50 focus:ring-red-200' : 'border-gray-300 focus:ring-green-200 focus:border-green-500'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={baseClassName}
           required={required}
           disabled={disabled}
         >
@@ -487,8 +526,7 @@ const FormField = React.memo(({
         <textarea
           value={value}
           onChange={onChange}
-          className={`w-full px-4 py-3 bg-white border rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 transition-all duration-200 resize-none ${error ? 'border-red-500 bg-red-50 focus:ring-red-200' : 'border-gray-300 focus:ring-green-200 focus:border-green-500'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`${baseClassName} resize-none`}
           placeholder={placeholder}
           maxLength={maxLength}
           required={required}
@@ -498,14 +536,12 @@ const FormField = React.memo(({
       );
     }
 
-    // Default input element - void element, no children [web:267][web:268]
     return (
       <input
         type={type}
         value={value}
         onChange={onChange}
-        className={`w-full px-4 py-3 bg-white border rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 transition-all duration-200 ${error ? 'border-red-500 bg-red-50 focus:ring-red-200' : 'border-gray-300 focus:ring-green-200 focus:border-green-500'
-          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className={baseClassName}
         placeholder={placeholder}
         maxLength={maxLength}
         required={required}
@@ -536,19 +572,36 @@ const FormField = React.memo(({
   );
 });
 
-// Simplified File Upload
+FormField.displayName = 'FormField';
+
+// File Upload Component
 const FileUpload = React.memo(({ files, onFilesChange, disabled, maxFiles = 3 }) => {
   const fileInputRef = useRef(null);
 
   const handleFileInput = useCallback((e) => {
     const selectedFiles = Array.from(e.target.files);
-    const totalFiles = [...files, ...selectedFiles];
+
+    // Validate file sizes (5MB max)
+    const validFiles = selectedFiles.filter(file => {
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`${file.name} is too large. Maximum size is 5MB.`);
+        return false;
+      }
+      return true;
+    });
+
+    const totalFiles = [...files, ...validFiles];
 
     if (totalFiles.length > maxFiles) {
       alert(`Maximum ${maxFiles} files allowed`);
-      onFilesChange([...files, ...selectedFiles].slice(0, maxFiles));
+      onFilesChange([...files, ...validFiles].slice(0, maxFiles));
     } else {
       onFilesChange(totalFiles);
+    }
+
+    // Reset input value
+    if (e.target) {
+      e.target.value = '';
     }
   }, [files, onFilesChange, maxFiles]);
 
@@ -569,7 +622,8 @@ const FileUpload = React.memo(({ files, onFilesChange, disabled, maxFiles = 3 })
       />
 
       <div
-        className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-green-400 transition-colors"
+        className={`border-2 border-dashed border-gray-300 rounded-lg p-6 text-center transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-green-400'
+          }`}
         onClick={() => !disabled && fileInputRef.current?.click()}
       >
         <FaUpload className="mx-auto text-2xl text-gray-500 mb-2" />
@@ -580,12 +634,17 @@ const FileUpload = React.memo(({ files, onFilesChange, disabled, maxFiles = 3 })
       {files.length > 0 && (
         <div className="space-y-2">
           {files.map((file, index) => (
-            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <span className="text-sm text-gray-900 truncate">{file.name}</span>
+            <div key={`${file.name}-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="text-sm text-gray-900 truncate">{file.name}</span>
+                <span className="text-xs text-gray-500 flex-shrink-0">
+                  ({(file.size / 1024).toFixed(1)} KB)
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => removeFile(index)}
-                className="text-red-500 hover:text-red-700"
+                className="text-red-500 hover:text-red-700 ml-2 flex-shrink-0"
                 disabled={disabled}
               >
                 <FaTimes />
@@ -598,7 +657,9 @@ const FileUpload = React.memo(({ files, onFilesChange, disabled, maxFiles = 3 })
   );
 });
 
-// Success Message
+FileUpload.displayName = 'FileUpload';
+
+// Success Message Component
 const SuccessMessage = React.memo(({ complaintId, onReset }) => (
   <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-md border border-gray-200 p-8 text-center">
     <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
@@ -613,6 +674,7 @@ const SuccessMessage = React.memo(({ complaintId, onReset }) => (
     <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
       <p className="text-sm text-green-800 mb-1"><strong>Complaint ID:</strong></p>
       <p className="text-lg font-mono font-bold text-green-900">{complaintId}</p>
+      <p className="text-xs text-green-700 mt-2">Save this ID to track your complaint</p>
     </div>
     <button
       onClick={onReset}
@@ -623,9 +685,11 @@ const SuccessMessage = React.memo(({ complaintId, onReset }) => (
   </div>
 ));
 
+SuccessMessage.displayName = 'SuccessMessage';
+
 // Main ComplaintForm Component
 function ComplaintForm({ setCurrentPage }) {
-  // Optimized state management
+  // State management
   const [formData, setFormData] = useState({
     title: "",
     category: "",
@@ -645,48 +709,79 @@ function ComplaintForm({ setCurrentPage }) {
   const [aadhaarData, setAadhaarData] = useState(null);
   const [errors, setErrors] = useState({});
 
-  // Simplified validation
+  // Validation function
   const validateField = useCallback((field, value) => {
     let error = '';
+
     switch (field) {
       case 'title':
-        if (!value.trim()) error = 'Title is required';
-        else if (value.length < 5) error = 'Title must be at least 5 characters';
-        break;
-      case 'category':
-        if (!value) error = 'Category is required';
-        break;
-      case 'description':
-        if (!value.trim()) error = 'Description is required';
-        else if (value.length < 10) error = 'Description must be at least 10 characters';
-        break;
-      case 'phone':
-        if ((formData.contactMethod === 'phone' || formData.contactMethod === 'both') &&
-          (!value.trim() || !/^[6-9]\d{9}$/.test(value.replace(/\D/g, '')))) {
-          error = 'Enter a valid 10-digit mobile number';
+        if (!value.trim()) {
+          error = 'Title is required';
+        } else if (value.trim().length < 5) {
+          error = 'Title must be at least 5 characters';
+        } else if (value.trim().length > 100) {
+          error = 'Title must not exceed 100 characters';
         }
         break;
+
+      case 'category':
+        if (!value) {
+          error = 'Category is required';
+        }
+        break;
+
+      case 'description':
+        if (!value.trim()) {
+          error = 'Description is required';
+        } else if (value.trim().length < 10) {
+          error = 'Description must be at least 10 characters';
+        } else if (value.trim().length > 1000) {
+          error = 'Description must not exceed 1000 characters';
+        }
+        break;
+
+      case 'phone':
+        if ((formData.contactMethod === 'phone' || formData.contactMethod === 'both')) {
+          const cleanPhone = value.replace(/\D/g, '');
+          if (!cleanPhone) {
+            error = 'Phone number is required';
+          } else if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+            error = 'Enter a valid 10-digit mobile number starting with 6-9';
+          }
+        }
+        break;
+
+      default:
+        break;
     }
+
     setErrors(prev => ({ ...prev, [field]: error }));
     return !error;
   }, [formData.contactMethod]);
 
   // Form validation check
   const isFormValid = useMemo(() => {
-    const hasRequiredFields = formData.title.trim() && formData.category && formData.description.trim();
-    const hasLocation = formData.location.formatted || formData.location.address;
-    const hasValidPhone = formData.contactMethod !== 'phone' ||
+    const hasRequiredFields = formData.title.trim() &&
+      formData.category &&
+      formData.description.trim();
+
+    const hasLocation = formData.location.latitude !== null &&
+      formData.location.longitude !== null;
+
+    const hasValidPhone = formData.contactMethod === 'email' ||
       (formData.phone && /^[6-9]\d{9}$/.test(formData.phone.replace(/\D/g, '')));
+
     const hasAadhaarIfNeeded = formData.reporterType !== 'verified' || aadhaarVerified;
+
     const hasNoErrors = Object.values(errors).every(error => !error);
 
     return hasRequiredFields && hasLocation && hasValidPhone && hasAadhaarIfNeeded && hasNoErrors;
   }, [formData, errors, aadhaarVerified]);
 
-  // Optimized handlers
+  // Input change handler
   const handleInputChange = useCallback((field, value) => {
     if (field === 'phone') {
-      value = value.replace(/\D/g, '');
+      value = value.replace(/\D/g, '').slice(0, 10);
     }
 
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -697,80 +792,91 @@ function ComplaintForm({ setCurrentPage }) {
     }
   }, [errors]);
 
+  // Location select handler
   const handleLocationSelect = useCallback((locationData) => {
     setFormData(prev => ({ ...prev, location: locationData }));
   }, []);
 
+  // Aadhaar verification handler
   const handleAadhaarVerification = useCallback((result) => {
     setAadhaarVerified(result.success);
     setAadhaarData(result.data || null);
   }, []);
 
-  // Optimized form submission
+  // Form submission handler
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
 
-    // Quick validation
-    const validations = [
-      validateField('title', formData.title),
-      validateField('category', formData.category),
-      validateField('description', formData.description),
-      validateField('phone', formData.phone)
-    ];
+    // Validate all fields before submission
+    const titleValid = validateField('title', formData.title);
+    const categoryValid = validateField('category', formData.category);
+    const descriptionValid = validateField('description', formData.description);
+    const phoneValid = validateField('phone', formData.phone);
 
-    if (!validations.every(Boolean) || !isFormValid) {
-      setIsSubmitting(false);
+    if (!titleValid || !categoryValid || !descriptionValid || !phoneValid || !isFormValid) {
+      alert('Please fix all errors before submitting');
       return;
     }
 
+    setIsSubmitting(true);
+
     try {
-      console.log('ComplaintForm - Submitting anonymous complaint...', {
-        formData: formData
-      });
-      
+      // Prepare attachment data
+      const attachmentData = attachments.map(file => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        originalName: file.name,
+        filename: `${Date.now()}_${file.name}`,
+        fileType: file.type,
+        fileSize: file.size
+      }));
+
+      // Submit complaint
       const response = await complaintAPI.submitComplaint({
         ...formData,
         aadhaarData: aadhaarVerified ? aadhaarData : null,
-        attachments: attachments.map(f => ({ 
-          name: f.name, 
-          size: f.size, 
-          type: f.type,
-          originalName: f.name,
-          filename: `${Date.now()}_${f.name}`,
-          fileType: f.type,
-          fileSize: f.size,
-          filePath: `/uploads/${Date.now()}_${f.name}`,
-          url: `/uploads/${Date.now()}_${f.name}`
-        }))
+        attachments: attachmentData
       });
 
-      setComplaintId(response.data.data.complaintId);
-      setIsSuccess(true);
+      if (response.data && response.data.complaintId) {
+        setComplaintId(response.data.complaintId);
+        setIsSuccess(true);
+      } else {
+        throw new Error('Invalid response from server');
+      }
     } catch (error) {
-      console.error('ComplaintForm - Submission failed:', {
-        status: error.response?.status,
-        message: error.response?.data?.message,
-        error: error.response?.data
-      });
-      
+      console.error('Submission failed:', error);
+
       let errorMessage = 'Submission failed. Please try again.';
-      
+
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
+      } else if (error.response?.status === 500) {
+        errorMessage = 'Server error. Please try again later.';
+      } else if (error.response?.status === 400) {
+        errorMessage = 'Invalid data. Please check your inputs.';
+      } else if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+        errorMessage = 'Cannot connect to server. Please check your internet connection.';
       }
-      
+
       alert(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
   }, [formData, attachments, aadhaarVerified, aadhaarData, isFormValid, validateField]);
 
+  // Reset form handler
   const handleReset = useCallback(() => {
     setFormData({
-      title: "", category: "", description: "",
+      title: "",
+      category: "",
+      description: "",
       location: { address: "", latitude: null, longitude: null, formatted: "" },
-      priority: "medium", reporterType: "anonymous", contactMethod: "email", phone: ""
+      priority: "medium",
+      reporterType: "anonymous",
+      contactMethod: "email",
+      phone: ""
     });
     setAttachments([]);
     setAadhaarVerified(false);
@@ -782,9 +888,19 @@ function ComplaintForm({ setCurrentPage }) {
 
   // Constants
   const categories = [
-    "Roads & Infrastructure", "Water Supply", "Electricity", "Sanitation & Waste",
-    "Public Safety", "Traffic & Transportation", "Environment", "Health Services",
-    "Plot Issue", "Plumbing", "Garbage", "Noise", "Other"
+    "Roads & Infrastructure",
+    "Water Supply",
+    "Electricity",
+    "Sanitation & Waste",
+    "Public Safety",
+    "Traffic & Transportation",
+    "Environment",
+    "Health Services",
+    "Plot Issue",
+    "Plumbing",
+    "Garbage",
+    "Noise",
+    "Other"
   ];
 
   const priorities = [
@@ -806,6 +922,7 @@ function ComplaintForm({ setCurrentPage }) {
     { value: "both", label: "Both Email & Phone" }
   ];
 
+  // Render success message if form submitted successfully
   if (isSuccess) {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
@@ -824,17 +941,21 @@ function ComplaintForm({ setCurrentPage }) {
           <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center space-y-4 lg:space-y-0">
             <div>
               <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-2">File a Complaint</h1>
-              <p className="text-gray-700 text-base lg:text-lg">Help us serve you better by reporting issues in your area</p>
+              <p className="text-gray-700 text-base lg:text-lg">
+                Help us serve you better by reporting issues in your area
+              </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-end">
               <button
+                type="button"
                 className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors shadow-md"
-                onClick={() => setCurrentPage?.("tracking")}
+                onClick={() => setCurrentPage?.("track-status")}
               >
                 <FaEye />
                 Track Status
               </button>
               <button
+                type="button"
                 className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors shadow-md"
                 onClick={() => setCurrentPage?.("dashboard")}
               >
@@ -872,6 +993,7 @@ function ComplaintForm({ setCurrentPage }) {
                     label="Complaint Title"
                     value={formData.title}
                     onChange={(e) => handleInputChange('title', e.target.value)}
+                    onBlur={() => validateField('title', formData.title)}
                     error={errors.title}
                     placeholder="Brief description of the issue"
                     maxLength={100}
@@ -884,6 +1006,7 @@ function ComplaintForm({ setCurrentPage }) {
                     as="select"
                     value={formData.category}
                     onChange={(e) => handleInputChange('category', e.target.value)}
+                    onBlur={() => validateField('category', formData.category)}
                     error={errors.category}
                     options={categories}
                     disabled={isSubmitting}
@@ -910,126 +1033,137 @@ function ComplaintForm({ setCurrentPage }) {
                 </div>
 
                 {/* Description */}
-                <FormField
-                  label="Detailed Description"
-                  as="textarea"
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  error={errors.description}
-                  placeholder="Please provide detailed information about the issue..."
-                  maxLength={1000}
-                  rows={4}
-                  disabled={isSubmitting}
-                />
-              </div>
-
-            {/* Location */}
-            <div>
-              <label className="block text-sm font-medium text-gray-900 mb-2">
-                <FaMapMarkerAlt className="inline text-green-600 mr-2" />
-                Location <span className="text-red-500">*</span>
-              </label>
-              <LocationPicker onLocationSelect={handleLocationSelect} disabled={isSubmitting} />
-            </div>
-
-            {/* Contact Information */}
-            <div className="border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Information</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  label="Contact Method"
-                  as="select"
-                  value={formData.contactMethod}
-                  onChange={(e) => handleInputChange('contactMethod', e.target.value)}
-                  options={contactMethods}
-                  disabled={isSubmitting}
-                  icon={FaEnvelope}
-                  required={false}
-                />
-
-                {(formData.contactMethod === "phone" || formData.contactMethod === "both") && (
+                <div className="mt-6">
                   <FormField
-                    label="Phone Number"
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
-                    error={errors.phone}
-                    placeholder="Enter 10-digit phone number"
-                    maxLength={10}
-                    icon={FaPhone}
+                    label="Detailed Description"
+                    as="textarea"
+                    value={formData.description}
+                    onChange={(e) => handleInputChange('description', e.target.value)}
+                    onBlur={() => validateField('description', formData.description)}
+                    error={errors.description}
+                    placeholder="Please provide detailed information about the issue..."
+                    maxLength={1000}
+                    rows={4}
                     disabled={isSubmitting}
                   />
-                )}
-              </div>
-            </div>
-
-            {/* File Attachments */}
-            <div className="border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Attachments <span className="text-sm font-normal text-gray-600">(Optional)</span>
-              </h3>
-              <FileUpload
-                files={attachments}
-                onFilesChange={setAttachments}
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Validation Messages */}
-            {formData.reporterType === "verified" && !aadhaarVerified && (
-              <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
-                <div className="flex items-center">
-                  <FaExclamationTriangle className="w-5 h-5 text-orange-600 mr-2" />
-                  <p className="text-sm text-orange-800">
-                    Please complete Aadhaar verification to submit a verified complaint
-                  </p>
                 </div>
               </div>
-            )}
 
-            {(!formData.location.latitude && !formData.location.longitude) && (
-              <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
-                <div className="flex items-center">
-                  <FaMapMarkerAlt className="w-5 h-5 text-orange-600 mr-2" />
-                  <p className="text-sm text-orange-800">
-                    Please select a location above
-                  </p>
+              {/* Location */}
+              <div className="border-t border-gray-200 pt-8">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                  <FaMapMarkerAlt className="text-green-600" />
+                  Location
+                  <span className="text-red-500">*</span>
+                </h3>
+                <LocationPicker onLocationSelect={handleLocationSelect} disabled={isSubmitting} />
+              </div>
+
+              {/* Contact Information */}
+              <div className="border-t border-gray-200 pt-8">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                  <FaEnvelope className="text-green-600" />
+                  Contact Information
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FormField
+                    label="Contact Method"
+                    as="select"
+                    value={formData.contactMethod}
+                    onChange={(e) => handleInputChange('contactMethod', e.target.value)}
+                    options={contactMethods}
+                    disabled={isSubmitting}
+                    icon={FaEnvelope}
+                    required={false}
+                  />
+
+                  {(formData.contactMethod === "phone" || formData.contactMethod === "both") && (
+                    <FormField
+                      label="Phone Number"
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      onBlur={() => validateField('phone', formData.phone)}
+                      error={errors.phone}
+                      placeholder="10-digit mobile number"
+                      maxLength={10}
+                      icon={FaPhone}
+                      disabled={isSubmitting}
+                    />
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* Submit Buttons */}
-            <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={handleReset}
-                disabled={isSubmitting}
-                className="px-6 py-3 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 font-medium rounded-lg transition-colors disabled:opacity-50"
-              >
-                Reset
-              </button>
+              {/* File Attachments */}
+              <div className="border-t border-gray-200 pt-8">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                  <FaUpload className="text-green-600" />
+                  Attachments
+                  <span className="text-sm font-normal text-gray-600 ml-2">(Optional)</span>
+                </h3>
+                <FileUpload
+                  files={attachments}
+                  onFilesChange={setAttachments}
+                  disabled={isSubmitting}
+                  maxFiles={3}
+                />
+              </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting || !isFormValid}
-                className={`px-8 py-3 font-semibold rounded-lg transition-colors flex items-center gap-2 min-w-40 ${isSubmitting || !isFormValid
-                    ? 'bg-gray-400 cursor-not-allowed text-white'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-              >
-                {isSubmitting ? (
-                  <>
-                    <FaSpinner className="animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <FaFileAlt />
-                    Submit Complaint
-                  </>
-                )}
-              </button>
-            </div>
+              {/* Validation Messages */}
+              {formData.reporterType === "verified" && !aadhaarVerified && (
+                <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                  <div className="flex items-center">
+                    <FaExclamationTriangle className="w-5 h-5 text-orange-600 mr-2 flex-shrink-0" />
+                    <p className="text-sm text-orange-800">
+                      Please complete Aadhaar verification to submit a verified complaint
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {(!formData.location.latitude || !formData.location.longitude) && (
+                <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                  <div className="flex items-center">
+                    <FaMapMarkerAlt className="w-5 h-5 text-orange-600 mr-2 flex-shrink-0" />
+                    <p className="text-sm text-orange-800">
+                      Please select a location using the map or search above
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Buttons */}
+              <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={isSubmitting}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Reset Form
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !isFormValid}
+                  className={`px-8 py-3 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 min-w-[160px] ${isSubmitting || !isFormValid
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : 'bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg'
+                    }`}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <FaSpinner className="animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <FaFileAlt />
+                      Submit Complaint
+                    </>
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -1042,14 +1176,15 @@ function ComplaintForm({ setCurrentPage }) {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
             <div>
-              <p className="font-medium text-gray-900">Emergency Issues</p>
-              <p className="text-gray-700 mt-1">
-                For urgent matters, call: <span className="font-mono text-green-600 font-bold">1800-XXX-XXXX</span>
+              <p className="font-medium text-gray-900 mb-1">Emergency Issues</p>
+              <p className="text-gray-700">
+                For urgent matters, call:{' '}
+                <span className="font-mono text-green-600 font-bold">1800-XXX-XXXX</span>
               </p>
             </div>
             <div>
-              <p className="font-medium text-gray-900">Response Time</p>
-              <p className="text-gray-700 mt-1">We typically respond within 24-48 hours</p>
+              <p className="font-medium text-gray-900 mb-1">Response Time</p>
+              <p className="text-gray-700">We typically respond within 24-48 hours</p>
             </div>
           </div>
         </div>

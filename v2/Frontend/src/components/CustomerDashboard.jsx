@@ -30,12 +30,12 @@ export default function CustomerDashboard({
 
   useEffect(() => {
     fetchDashboardData();
-    
+
     // Set up auto-refresh every 30 seconds
     const interval = setInterval(() => {
       fetchDashboardData();
     }, 30000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -44,70 +44,82 @@ export default function CustomerDashboard({
       setLoading(true);
       setError(null);
 
-      let statsData = null;
-      let complaintsData = [];
+      // Fetch recent complaints (using the same pattern as Tracking.jsx)
+      const complaintsResponse = await complaintAPI.getRecentComplaints({ limit: 5 });
 
-      // Try authenticated endpoints first, fall back to public endpoints
-      try {
-        // Try to fetch user-specific stats
-        const statsResponse = await complaintAPI.getUserComplaintStats();
-        statsData = statsResponse.data.data;
-        
-        // Try to fetch user-specific complaints
-        const complaintsResponse = await complaintAPI.getUserComplaints({ limit: 5, sort: 'created_at', order: 'DESC' });
-        complaintsData = complaintsResponse.data.data?.complaints || [];
-        
-      } catch (authError) {
-        console.log('Authentication failed, falling back to public endpoints:', authError);
-        
-        // Fallback to public endpoints
-        try {
-          // Use public stats endpoint
-          const publicStatsResponse = await complaintAPI.getComplaintStats();
-          const publicStats = publicStatsResponse.data.stats;
-          
-          // Convert public stats format to match user stats format
-          statsData = {
-            totalComplaints: publicStats.total,
-            statusCounts: {
-              submitted: publicStats.status.pending,
-              inProgress: publicStats.status.in_progress,
-              resolved: publicStats.status.resolved,
-              closed: publicStats.status.closed
-            }
-          };
-          
-          // Use public recent complaints endpoint
-          const publicComplaintsResponse = await complaintAPI.getRecentComplaints({ limit: 5 });
-          complaintsData = publicComplaintsResponse.data.complaints || [];
-          
-        } catch (publicError) {
-          console.error('Both authenticated and public endpoints failed:', publicError);
-          throw new Error('Unable to fetch data from any endpoint');
-        }
+      if (complaintsResponse.data && complaintsResponse.data.success) {
+        const complaintsData = complaintsResponse.data.complaints || [];
+
+        // Calculate stats from the complaints data
+        const calculatedStats = {
+          total: complaintsData.length,
+          pending: 0,
+          inProgress: 0,
+          resolved: 0
+        };
+
+        // Count status occurrences
+        complaintsData.forEach(complaint => {
+          switch (complaint.status) {
+            case 'submitted':
+              calculatedStats.pending++;
+              break;
+            case 'in_progress':
+              calculatedStats.inProgress++;
+              break;
+            case 'resolved':
+            case 'closed':
+              calculatedStats.resolved++;
+              break;
+            default:
+              break;
+          }
+        });
+
+        // Update stats
+        setStats(calculatedStats);
+
+        // Format complaints data
+        const formattedComplaints = complaintsData.map(complaint => ({
+          id: complaint.complaint_id,
+          title: complaint.title,
+          status: formatStatus(complaint.status),
+          date: new Date(complaint.created_at).toLocaleDateString('en-CA')
+        }));
+
+        setComplaints(formattedComplaints);
+      } else {
+        // If no data, set empty states
+        setComplaints([]);
+        setStats({
+          total: 0,
+          resolved: 0,
+          inProgress: 0,
+          pending: 0
+        });
       }
-
-      // Update stats
-      setStats({
-        total: statsData.totalComplaints,
-        resolved: statsData.statusCounts.resolved + statsData.statusCounts.closed,
-        inProgress: statsData.statusCounts.inProgress,
-        pending: statsData.statusCounts.submitted
-      });
-
-      // Format complaints data
-      const formattedComplaints = complaintsData.map(complaint => ({
-        id: complaint.complaint_id,
-        title: complaint.title,
-        status: formatStatus(complaint.status),
-        date: new Date(complaint.created_at).toLocaleDateString('en-CA')
-      }));
-
-      setComplaints(formattedComplaints);
 
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
-      setError('Failed to load dashboard data. Please try again.');
+
+      // Set fallback demo data to show the UI works
+      setComplaints([
+        {
+          id: "CMP12345DEMO",
+          title: "Demo: Submit a complaint to see real data",
+          status: "Pending",
+          date: new Date().toLocaleDateString('en-CA')
+        }
+      ]);
+
+      setStats({
+        total: 1,
+        resolved: 0,
+        inProgress: 0,
+        pending: 1
+      });
+
+      setError('Unable to fetch live data. Showing demo data. Please submit a complaint first.');
     } finally {
       setLoading(false);
     }
@@ -187,15 +199,15 @@ export default function CustomerDashboard({
               disabled={loading}
               className="flex items-center bg-white bg-opacity-20 px-3 py-2 rounded-lg hover:bg-opacity-30 transition-all"
             >
-              <FaSync className={`mr-2 text-black ${loading ? 'animate-spin' : ''}`} />
-              <span className="text-sm text-black font-medium">
+              <FaSync className={`mr-2 text-white ${loading ? 'animate-spin' : ''}`} />
+              <span className="text-sm text-white font-medium">
                 {loading ? 'Refreshing...' : 'Refresh'}
               </span>
             </button>
             <div className="flex items-center bg-white bg-opacity-20 px-4 py-2 rounded-lg">
-              <FaBell className="mr-2 animate-pulse text-black" />
-              <span className="text-sm text-black font-medium">
-                2 updates available
+              <FaBell className="mr-2 animate-pulse text-white" />
+              <span className="text-sm text-white font-medium">
+                {stats.total} total complaints
               </span>
             </div>
           </div>
@@ -204,11 +216,11 @@ export default function CustomerDashboard({
 
       {/* Error Message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md">
           <p>{error}</p>
-          <button 
+          <button
             onClick={fetchDashboardData}
-            className="mt-2 text-red-600 hover:text-red-800 underline text-sm"
+            className="mt-2 text-yellow-600 hover:text-yellow-800 underline text-sm"
           >
             Try again
           </button>
@@ -224,46 +236,48 @@ export default function CustomerDashboard({
       )}
 
       {/* Stats Overview */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            label: "Total Complaints",
-            value: stats.total,
-            color: "text-blue-600",
-            bgColor: "bg-blue-50",
-          },
-          {
-            label: "Resolved",
-            value: stats.resolved,
-            color: "text-green-600",
-            bgColor: "bg-green-50",
-          },
-          {
-            label: "In Progress",
-            value: stats.inProgress,
-            color: "text-blue-600",
-            bgColor: "bg-blue-50",
-          },
-          {
-            label: "Pending",
-            value: stats.pending,
-            color: "text-yellow-600",
-            bgColor: "bg-yellow-50",
-          },
-        ].map(({ label, value, color, bgColor }, idx) => (
-          <div
-            key={idx}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
-          >
+      {!loading && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            {
+              label: "Total Complaints",
+              value: stats.total,
+              color: "text-blue-600",
+              bgColor: "bg-blue-50",
+            },
+            {
+              label: "Resolved",
+              value: stats.resolved,
+              color: "text-green-600",
+              bgColor: "bg-green-50",
+            },
+            {
+              label: "In Progress",
+              value: stats.inProgress,
+              color: "text-blue-600",
+              bgColor: "bg-blue-50",
+            },
+            {
+              label: "Pending",
+              value: stats.pending,
+              color: "text-yellow-600",
+              bgColor: "bg-yellow-50",
+            },
+          ].map(({ label, value, color, bgColor }, idx) => (
             <div
-              className={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center mb-3`}
+              key={idx}
+              className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
             >
-              <span className={`text-xl font-bold ${color}`}>{loading ? '-' : value}</span>
+              <div
+                className={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center mb-3`}
+              >
+                <span className={`text-xl font-bold ${color}`}>{value}</span>
+              </div>
+              <p className="text-sm font-medium text-gray-600">{label}</p>
             </div>
-            <p className="text-sm font-medium text-gray-600">{label}</p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -297,7 +311,7 @@ export default function CustomerDashboard({
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center">
             <FaFileAlt className="mr-2 text-green-600" />
-            My Recent Complaints
+            Recent Complaints
           </h3>
           <button
             onClick={() => setCurrentPage("track-status")}
@@ -323,12 +337,13 @@ export default function CustomerDashboard({
             {complaints.map((complaint) => (
               <div
                 key={complaint.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+                onClick={() => setCurrentPage("track-status")}
               >
                 <div className="flex-1">
                   <p className="font-medium text-gray-900">{complaint.title}</p>
                   <p className="text-sm text-gray-600 mt-1">
-                    Filed on {complaint.date}
+                    ID: {complaint.id} • Filed on {complaint.date}
                   </p>
                 </div>
                 <span
@@ -353,7 +368,7 @@ export default function CustomerDashboard({
               Need Help?
             </h4>
             <p className="text-gray-600 mb-4">
-              Our support team is here to help you with any questions about
+              Our support team is here to help with any questions about
               filing complaints or tracking their progress.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">

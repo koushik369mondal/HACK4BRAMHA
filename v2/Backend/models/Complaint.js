@@ -24,6 +24,10 @@ const complaintSchema = new mongoose.Schema({
       'Traffic & Transportation',
       'Environment',
       'Health Services',
+      'Plot Issue',
+      'Plumbing',
+      'Garbage',
+      'Noise',
       'Other'
     ]
   },
@@ -44,7 +48,7 @@ const complaintSchema = new mongoose.Schema({
   },
   reporter_type: {
     type: String,
-    enum: ['anonymous', 'registered'],
+    enum: ['anonymous', 'pseudonymous', 'verified'],
     default: 'anonymous'
   },
   contact_method: {

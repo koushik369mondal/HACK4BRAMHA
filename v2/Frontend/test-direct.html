@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complaint API Test</title>
+</head>
+<body>
+    <h1>Complaint Submission Test</h1>
+    <button id="testBtn">Test Complaint Submission</button>
+    <div id="result"></div>
+
+    <script>
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            const testComplaint = {
+                title: 'Browser Direct Test',
+                category: 'Noise',
+                description: 'Testing directly from browser',
+                priority: 'medium',
+                reporterType: 'anonymous',
+                contactMethod: 'email',
+                location: {
+                    address: 'Test Address',
+                    latitude: 26.1445,
+                    longitude: 91.7362,
+                    formatted: 'Test Address, Guwahati'
+                },
+                phone: '',
+                aadhaarData: null,
+                attachments: []
+            };
+            
+            try {
+                console.log('Sending request to:', 'http://localhost:5000/api/complaints/anonymous');
+                console.log('Data:', testComplaint);
+                
+                const response = await fetch('http://localhost:5000/api/complaints/anonymous', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(testComplaint)
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', [...response.headers.entries()]);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Success response:', data);
+                
+                resultDiv.innerHTML = `
+                    <h3>✅ Success!</h3>
+                    <p><strong>Complaint ID:</strong> ${data.complaintId}</p>
+                    <p><strong>Status:</strong> ${data.status}</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.innerHTML = `
+                    <h3>❌ Error!</h3>
+                    <p><strong>Message:</strong> ${error.message}</p>
+                    <p><strong>Details:</strong> ${error.stack}</p>
+                `;
+            }
+        });
+    </script>
+</body>
+</html>

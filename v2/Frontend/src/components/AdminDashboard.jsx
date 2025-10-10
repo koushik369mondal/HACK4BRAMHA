@@ -13,7 +13,7 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
   const [recentComplaints, setRecentComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+
   // Modal states
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -23,9 +23,17 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
     notes: ''
   });
   const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateSuccess, setUpdateSuccess] = useState(false);
 
   useEffect(() => {
     fetchAdminDashboardData();
+
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchAdminDashboardData();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const fetchAdminDashboardData = async () => {
@@ -33,103 +41,117 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
       setLoading(true);
       setError(null);
 
-      let statsData = null;
-      let complaintsData = [];
+      // Use the same working endpoint as Tracking.jsx - getRecentComplaints
+      const response = await complaintAPI.getRecentComplaints({ limit: 10 });
 
-      // For admin dashboard, we should use public endpoints for system-wide data
-      // TODO: Create proper admin-specific endpoints in the future
-      
-      try {
-        // Use public stats endpoint for system-wide statistics
-        const publicStatsResponse = await complaintAPI.getComplaintStats();
-        const publicStats = publicStatsResponse.data.stats;
-        
-        // Convert public stats format to match expected format
-        statsData = {
-          totalComplaints: publicStats.total,
-          statusCounts: {
-            submitted: publicStats.status.pending,
-            inProgress: publicStats.status.in_progress,
-            resolved: publicStats.status.resolved,
-            closed: publicStats.status.closed
-          }
+      if (response.data && response.data.success) {
+        const complaintsData = response.data.complaints || [];
+
+        // Calculate statistics from the complaints data
+        const calculatedStats = {
+          total: complaintsData.length,
+          pending: 0,
+          inProgress: 0,
+          resolved: 0
         };
-        
-        // Use public recent complaints endpoint for system-wide complaints
-        const publicComplaintsResponse = await complaintAPI.getRecentComplaints({ limit: 5 });
-        complaintsData = publicComplaintsResponse.data.complaints || [];
-        
-      } catch (publicError) {
-        console.log('Public endpoints failed, trying authenticated endpoints as fallback:', publicError);
-        
-        // Fallback to authenticated endpoints (user-specific data)
-        try {
-          const statsResponse = await complaintAPI.getUserComplaintStats();
-          statsData = statsResponse.data.data;
-          
-          const complaintsResponse = await complaintAPI.getUserComplaints({ limit: 5, sort: 'created_at', order: 'DESC' });
-          complaintsData = complaintsResponse.data.data;
-          
-        } catch (authError) {
-          console.error('Both public and authenticated endpoints failed:', authError);
-          throw new Error('Unable to fetch data from any endpoint');
-        }
+
+        // Count status occurrences
+        complaintsData.forEach(complaint => {
+          switch (complaint.status) {
+            case 'submitted':
+              calculatedStats.pending++;
+              break;
+            case 'in_progress':
+              calculatedStats.inProgress++;
+              break;
+            case 'resolved':
+            case 'closed':
+              calculatedStats.resolved++;
+              break;
+            default:
+              break;
+          }
+        });
+
+        // Update stats with calculated values
+        const updatedStats = [
+          {
+            label: "Total Complaints",
+            value: calculatedStats.total.toString(),
+            icon: FaExclamationTriangle,
+            color: "text-blue-600",
+            bgColor: "bg-blue-100"
+          },
+          {
+            label: "Resolved",
+            value: calculatedStats.resolved.toString(),
+            icon: FaCheckCircle,
+            color: "text-green-600",
+            bgColor: "bg-green-100"
+          },
+          {
+            label: "Pending",
+            value: calculatedStats.pending.toString(),
+            icon: FaClock,
+            color: "text-yellow-600",
+            bgColor: "bg-yellow-100"
+          },
+          {
+            label: "In Progress",
+            value: calculatedStats.inProgress.toString(),
+            icon: FaUsers,
+            color: "text-purple-600",
+            bgColor: "bg-purple-100"
+          },
+        ];
+
+        setStats(updatedStats);
+
+        // Format complaints data with complete information
+        const formattedComplaints = complaintsData.map(complaint => ({
+          id: complaint.complaint_id,
+          complaintId: complaint.complaint_id,
+          category: complaint.category || 'General',
+          status: formatStatus(complaint.status),
+          rawStatus: complaint.status,
+          date: new Date(complaint.created_at).toLocaleDateString('en-CA'),
+          priority: complaint.priority || 'Medium',
+          title: complaint.title || 'N/A',
+          description: complaint.description || 'N/A',
+          createdAt: complaint.created_at,
+          updatedAt: complaint.updated_at,
+          locationAddress: complaint.location?.address || 'Not specified',
+          location: complaint.location,
+          reporterType: complaint.reporter_type
+        }));
+
+        setRecentComplaints(formattedComplaints);
+      } else {
+        // Set empty states
+        setRecentComplaints([]);
       }
-
-      // Update stats with real data
-      const updatedStats = [
-        { 
-          label: "Total Complaints", 
-          value: statsData.totalComplaints.toString(), 
-          icon: FaExclamationTriangle, 
-          color: "text-blue-600", 
-          bgColor: "bg-blue-100" 
-        },
-        { 
-          label: "Resolved", 
-          value: (statsData.statusCounts.resolved + statsData.statusCounts.closed).toString(), 
-          icon: FaCheckCircle, 
-          color: "text-green-600", 
-          bgColor: "bg-green-100" 
-        },
-        { 
-          label: "Pending", 
-          value: statsData.statusCounts.submitted.toString(), 
-          icon: FaClock, 
-          color: "text-yellow-600", 
-          bgColor: "bg-yellow-100" 
-        },
-        { 
-          label: "Active Users", 
-          value: "156", // TODO: Implement user count endpoint
-          icon: FaUsers, 
-          color: "text-purple-600", 
-          bgColor: "bg-purple-100" 
-        },
-      ];
-
-      setStats(updatedStats);
-
-      // Format recent complaints data - store more complete data
-      const formattedComplaints = complaintsData.map(complaint => ({
-        id: complaint.complaint_id,
-        complaintId: complaint.complaint_id,
-        category: complaint.category,
-        status: formatStatus(complaint.status),
-        rawStatus: complaint.status, // Keep raw status for editing
-        date: new Date(complaint.created_at).toLocaleDateString('en-CA'),
-        priority: complaint.priority || 'Medium', // Default priority if not set
-        title: complaint.title || 'N/A',
-        description: complaint.description || 'N/A',
-        createdAt: complaint.created_at,
-        locationAddress: complaint.location_address || 'Not specified'
-      }));
-
-      setRecentComplaints(formattedComplaints);
 
     } catch (err) {
       console.error('Error fetching admin dashboard data:', err);
-      setError('Failed to load dashboard data. Please try again.');
+
+      // Fallback demo data
+      setRecentComplaints([
+        {
+          id: "CMP12345DEMO",
+          complaintId: "CMP12345DEMO",
+          title: "Demo: Submit complaints to see real data",
+          category: "General",
+          status: "Pending",
+          rawStatus: "submitted",
+          date: new Date().toLocaleDateString('en-CA'),
+          priority: "Medium",
+          description: "This is demo data. Submit a complaint to see real data.",
+          createdAt: new Date().toISOString(),
+          locationAddress: "Demo Location"
+        }
+      ]);
+
+      setError('Unable to fetch live data. Showing demo data. Please ensure complaints are submitted.');
     } finally {
       setLoading(false);
     }
@@ -152,33 +174,31 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
   // Handle viewing complaint details
   const handleView = async (complaintId) => {
     try {
-      // First try to find the complaint in our local data
+      // Find complaint in local data first
       const localComplaint = recentComplaints.find(c => c.id === complaintId || c.complaintId === complaintId);
-      
+
       if (localComplaint) {
-        console.log('Using local complaint data for viewing:', localComplaint);
-        // Use local data directly
         const complaint = {
           complaint_id: localComplaint.id,
           title: localComplaint.title,
           category: localComplaint.category,
-          status: localComplaint.rawStatus || localComplaint.status.toLowerCase().replace(' ', '_'),
+          status: localComplaint.rawStatus,
           priority: localComplaint.priority,
           description: localComplaint.description,
           location_address: localComplaint.locationAddress,
-          created_at: localComplaint.createdAt
+          created_at: localComplaint.createdAt,
+          updated_at: localComplaint.updatedAt,
+          reporter_type: localComplaint.reporterType
         };
-        
+
         setSelectedComplaint(complaint);
         setShowViewModal(true);
         return;
       }
-      
-      // Fallback to public tracking API
-      console.log('Attempting to fetch complaint details via public API for ID:', complaintId);
+
+      // Fallback to tracking API
       const response = await complaintAPI.trackComplaint(complaintId);
-      console.log('Public API response:', response);
-      
+
       if (response.data && response.data.complaint) {
         setSelectedComplaint(response.data.complaint);
         setShowViewModal(true);
@@ -194,48 +214,41 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
   // Handle editing complaint
   const handleEdit = async (complaintId) => {
     try {
-      // First try to find the complaint in our local data
+      setUpdateSuccess(false);
+
+      // Find complaint in local data first
       const localComplaint = recentComplaints.find(c => c.id === complaintId || c.complaintId === complaintId);
-      
+
       if (localComplaint) {
-        console.log('Using local complaint data for editing:', localComplaint);
-        // Use local data directly
         const complaint = {
           complaint_id: localComplaint.id,
           title: localComplaint.title,
           category: localComplaint.category,
-          status: localComplaint.rawStatus || localComplaint.status.toLowerCase().replace(' ', '_'),
+          status: localComplaint.rawStatus,
           priority: localComplaint.priority,
           description: localComplaint.description,
           location_address: localComplaint.locationAddress,
-          created_at: localComplaint.createdAt
+          created_at: localComplaint.createdAt,
+          updated_at: localComplaint.updatedAt
         };
-        
+
         setSelectedComplaint(complaint);
         setEditForm({
-          status: complaint.status === 'submitted' ? 'submitted' : 
-                 complaint.status === 'in_progress' ? 'in_progress' :
-                 complaint.status === 'resolved' ? 'resolved' :
-                 complaint.status === 'closed' ? 'closed' : 'submitted',
+          status: complaint.status,
           notes: ''
         });
         setShowEditModal(true);
         return;
       }
-      
-      // Fallback to public tracking API if not found locally
-      console.log('Attempting to fetch complaint details for editing via public API, ID:', complaintId);
+
+      // Fallback to tracking API
       const response = await complaintAPI.trackComplaint(complaintId);
-      console.log('Public API response for edit:', response);
-      
+
       if (response.data && response.data.complaint) {
         const complaint = response.data.complaint;
         setSelectedComplaint(complaint);
         setEditForm({
-          status: complaint.status === 'submitted' ? 'submitted' : 
-                 complaint.status === 'in_progress' ? 'in_progress' :
-                 complaint.status === 'resolved' ? 'resolved' :
-                 complaint.status === 'closed' ? 'closed' : 'submitted',
+          status: complaint.status,
           notes: ''
         });
         setShowEditModal(true);
@@ -251,42 +264,46 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
   // Handle status update
   const handleStatusUpdate = async () => {
     if (!selectedComplaint) return;
-    
+
     setUpdateLoading(true);
+    setError(null);
+
     try {
-      // Check if we have a token
+      // Check for admin token
       const token = localStorage.getItem('token');
-      console.log('Current token in localStorage:', token ? 'Present' : 'Missing');
-      
-      console.log('Updating complaint status:', {
-        complaintId: selectedComplaint.complaint_id,
-        status: editForm.status,
-        notes: editForm.notes
-      });
-      
+
+      if (!token) {
+        throw new Error('Admin authentication required. Please login again.');
+      }
+
       const response = await complaintAPI.updateComplaintStatus(selectedComplaint.complaint_id, {
         status: editForm.status,
         notes: editForm.notes
       });
-      
-      console.log('Status update response:', response);
-      
-      // Refresh dashboard data
-      await fetchAdminDashboardData();
-      
-      // Close modal
-      setShowEditModal(false);
-      setSelectedComplaint(null);
-      setEditForm({ status: '', notes: '' });
-      
+
       // Show success message
-      setError(null);
-      
+      setUpdateSuccess(true);
+
+      // Refresh dashboard data after a short delay
+      setTimeout(async () => {
+        await fetchAdminDashboardData();
+
+        // Close modal
+        setShowEditModal(false);
+        setSelectedComplaint(null);
+        setEditForm({ status: '', notes: '' });
+        setUpdateSuccess(false);
+      }, 1500);
+
     } catch (error) {
       console.error('Error updating complaint status:', error);
-      console.error('Error response:', error.response);
       const errorMessage = error.response?.data?.message || error.message || 'Unknown error occurred';
-      setError(`Failed to update complaint status: ${errorMessage}`);
+
+      if (errorMessage.includes('authentication') || errorMessage.includes('token')) {
+        setError('Admin authentication required. Please logout and login again with admin credentials.');
+      } else {
+        setError(`Failed to update complaint status: ${errorMessage}`);
+      }
     } finally {
       setUpdateLoading(false);
     }
@@ -298,6 +315,8 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
     setShowEditModal(false);
     setSelectedComplaint(null);
     setEditForm({ status: '', notes: '' });
+    setUpdateSuccess(false);
+    setError(null);
   };
 
   const getStatusColor = (status) => {
@@ -335,23 +354,29 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
             </p>
           </div>
           <div className="flex items-center space-x-3">
-            <div className="flex items-center bg-white bg-opacity-20 px-4 py-2 rounded-lg">
-              <FaChartLine className="mr-2 text-black" />
-              <span className="text-sm text-black font-medium">System Active</span>
-            </div>
+            <button
+              onClick={fetchAdminDashboardData}
+              disabled={loading}
+              className="flex items-center bg-white bg-opacity-20 px-3 py-2 rounded-lg hover:bg-opacity-30 transition-all"
+            >
+              <FaChartLine className={`mr-2 text-white ${loading ? 'animate-pulse' : ''}`} />
+              <span className="text-sm text-white font-medium">
+                {loading ? 'Refreshing...' : 'Refresh Data'}
+              </span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-          <p>{error}</p>
-          <button 
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md">
+          <p className="font-medium">{error}</p>
+          <button
             onClick={fetchAdminDashboardData}
-            className="mt-2 text-red-600 hover:text-red-800 underline text-sm"
+            className="mt-2 text-yellow-600 hover:text-yellow-800 underline text-sm"
           >
-            Try again
+            Retry
           </button>
         </div>
       )}
@@ -365,21 +390,23 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map(({ label, value, icon: Icon, color, bgColor }, idx) => (
-          <div key={idx} className="bg-white shadow-sm rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow duration-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold text-gray-900">{value}</p>
-                <p className="text-sm font-medium text-gray-600 mt-1">{label}</p>
-              </div>
-              <div className={`${bgColor} p-3 rounded-lg`}>
-                <Icon className={`${color} text-xl`} />
+      {!loading && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {stats.map(({ label, value, icon: Icon, color, bgColor }, idx) => (
+            <div key={idx} className="bg-white shadow-sm rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{value}</p>
+                  <p className="text-sm font-medium text-gray-600 mt-1">{label}</p>
+                </div>
+                <div className={`${bgColor} p-3 rounded-lg`}>
+                  <Icon className={`${color} text-xl`} />
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Recent Complaints Table */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200">
@@ -392,7 +419,7 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
               <button className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
                 Export Data
               </button>
-              <button 
+              <button
                 onClick={() => setCurrentPage("track-status")}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
               >
@@ -432,13 +459,14 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
                   <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
                     <FaFileAlt className="mx-auto text-4xl text-gray-300 mb-4" />
                     <p>No complaints found.</p>
+                    <p className="text-sm mt-2">Complaints will appear here once submitted.</p>
                   </td>
                 </tr>
               ) : (
                 recentComplaints.map(({ id, category, status, date, priority }) => (
                   <tr key={id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="font-medium text-gray-900">{id}</span>
+                      <span className="font-medium text-gray-900 text-sm">{id}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-gray-700 capitalize">{category}</span>
@@ -457,13 +485,13 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
                       {date}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button 
+                      <button
                         onClick={() => handleView(id)}
                         className="text-green-600 hover:text-green-800 font-medium mr-3"
                       >
                         View
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleEdit(id)}
                         className="text-blue-600 hover:text-blue-800 font-medium"
                       >
@@ -483,11 +511,14 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
         <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-200">
           <h4 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h4>
           <div className="space-y-3">
-            <button className="w-full text-left p-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors">
-              Generate Monthly Report
+            <button
+              onClick={() => setCurrentPage("track-status")}
+              className="w-full text-left p-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+            >
+              View All Complaints
             </button>
             <button className="w-full text-left p-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors">
-              Manage User Accounts
+              Generate Monthly Report
             </button>
             <button className="w-full text-left p-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors">
               System Settings
@@ -520,21 +551,21 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
               <div className="w-2 h-2 bg-green-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
               <div>
                 <p className="text-gray-900">New complaint submitted</p>
-                <p className="text-gray-500">2 minutes ago</p>
+                <p className="text-gray-500">Recently</p>
               </div>
             </div>
             <div className="flex items-start">
               <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
               <div>
-                <p className="text-gray-900">Complaint status updated</p>
-                <p className="text-gray-500">15 minutes ago</p>
+                <p className="text-gray-900">Dashboard data updated</p>
+                <p className="text-gray-500">Just now</p>
               </div>
             </div>
             <div className="flex items-start">
               <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
               <div>
-                <p className="text-gray-900">User account created</p>
-                <p className="text-gray-500">1 hour ago</p>
+                <p className="text-gray-900">System running smoothly</p>
+                <p className="text-gray-500">Continuous</p>
               </div>
             </div>
           </div>
@@ -543,72 +574,83 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
 
       {/* View Modal */}
       {showViewModal && selectedComplaint && (
-        <div 
+        <div
           className="fixed inset-0 z-50 overflow-y-auto"
           style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)'
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)'
           }}
         >
           <div className="fixed inset-0" onClick={closeModals}></div>
           <div className="relative min-h-screen flex items-center justify-center p-4">
-            <div className="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Complaint Details</h3>
+            <div className="relative mx-auto p-6 border w-full max-w-2xl shadow-xl rounded-lg bg-white">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-gray-900">Complaint Details</h3>
                 <button
                   onClick={closeModals}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  <FaTimes className="h-6 w-6" />
+                  <FaTimes className="h-5 w-5" />
                 </button>
               </div>
-            
+
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Complaint ID</label>
-                  <p className="text-gray-900">{selectedComplaint.complaint_id}</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Title</label>
-                  <p className="text-gray-900">{selectedComplaint.title}</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Category</label>
-                  <p className="text-gray-900 capitalize">{selectedComplaint.category}</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Description</label>
-                  <p className="text-gray-900">{selectedComplaint.description}</p>
-                </div>
-                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Status</label>
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(formatStatus(selectedComplaint.status))}`}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Complaint ID</label>
+                    <p className="text-gray-900 font-mono text-sm">{selectedComplaint.complaint_id}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(formatStatus(selectedComplaint.status))}`}>
                       {formatStatus(selectedComplaint.status)}
                     </span>
                   </div>
-                  
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                  <p className="text-gray-900">{selectedComplaint.title}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Priority</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                    <p className="text-gray-900 capitalize">{selectedComplaint.category}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
                     <span className={`font-medium capitalize ${getPriorityColor(selectedComplaint.priority)}`}>
                       {selectedComplaint.priority}
                     </span>
                   </div>
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Location</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <p className="text-gray-900 bg-gray-50 p-3 rounded-md">{selectedComplaint.description}</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
                   <p className="text-gray-900">{selectedComplaint.location_address || 'Not specified'}</p>
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Created At</label>
-                  <p className="text-gray-900">{new Date(selectedComplaint.created_at).toLocaleString()}</p>
+
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Created At</label>
+                    <p className="text-gray-600 text-sm">{new Date(selectedComplaint.created_at).toLocaleString()}</p>
+                  </div>
+
+                  {selectedComplaint.updated_at && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Updated</label>
+                      <p className="text-gray-600 text-sm">{new Date(selectedComplaint.updated_at).toLocaleString()}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -618,44 +660,56 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
 
       {/* Edit Modal */}
       {showEditModal && selectedComplaint && (
-        <div 
+        <div
           className="fixed inset-0 z-50 overflow-y-auto"
           style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)'
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)'
           }}
         >
-          <div className="fixed inset-0" onClick={closeModals}></div>
+          <div className="fixed inset-0" onClick={!updateLoading ? closeModals : undefined}></div>
           <div className="relative min-h-screen flex items-center justify-center p-4">
-            <div className="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Edit Complaint</h3>
+            <div className="relative mx-auto p-6 border w-full max-w-2xl shadow-xl rounded-lg bg-white">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-gray-900">Edit Complaint Status</h3>
                 <button
                   onClick={closeModals}
-                  className="text-gray-400 hover:text-gray-600"
+                  disabled={updateLoading}
+                  className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
                 >
-                  <FaTimes className="h-6 w-6" />
+                  <FaTimes className="h-5 w-5" />
                 </button>
               </div>
-            
+
+              {updateSuccess && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-md">
+                  <FaCheckCircle className="inline mr-2" />
+                  Status updated successfully! Refreshing data...
+                </div>
+              )}
+
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Complaint ID</label>
-                  <p className="text-gray-900">{selectedComplaint.complaint_id}</p>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Complaint ID</label>
+                      <p className="text-gray-900 font-mono text-sm">{selectedComplaint.complaint_id}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                      <p className="text-gray-900 text-sm">{selectedComplaint.title}</p>
+                    </div>
+                  </div>
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Title</label>
-                  <p className="text-gray-900">{selectedComplaint.title}</p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Update Status *</label>
                   <select
                     value={editForm.status}
                     onChange={(e) => setEditForm(prev => ({ ...prev, status: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    disabled={updateLoading}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="submitted">Pending</option>
                     <option value="in_progress">In Progress</option>
@@ -663,29 +717,31 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
                     <option value="closed">Closed</option>
                   </select>
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Admin Notes (Optional)</label>
                   <textarea
                     value={editForm.notes}
                     onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="Add notes about this status change..."
+                    disabled={updateLoading}
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
+                    placeholder="Add notes about this status change (e.g., resolution details, action taken, etc.)"
                   />
                 </div>
-                
-                <div className="flex justify-end space-x-3 pt-4">
+
+                <div className="flex justify-end space-x-3 pt-4 border-t">
                   <button
                     onClick={closeModals}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                    disabled={updateLoading}
+                    className="px-5 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleStatusUpdate}
-                    disabled={updateLoading}
-                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 rounded-md transition-colors flex items-center"
+                    disabled={updateLoading || !editForm.status}
+                    className="px-5 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 rounded-md transition-colors flex items-center"
                   >
                     {updateLoading ? (
                       <>

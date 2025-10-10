@@ -1,8 +1,17 @@
 const { Complaint, UserProfile, Department } = require('../models');
 const { errorResponse, successResponse } = require('../utils/helpers');
+const mongoose = require('mongoose');
 
 // Create a new complaint
 const createComplaint = async (req, res) => {
+  console.log('🎯 createComplaint called:', {
+    method: req.method,
+    url: req.originalUrl,
+    body: req.body,
+    headers: req.headers['content-type'],
+    userAgent: req.headers['user-agent']
+  });
+  
   try {
     const {
       title,
@@ -336,8 +345,8 @@ const getUserComplaintStats = async (req, res) => {
     const userId = req.user?.id;
     let stats;
     
-    // For demo users, return sample stats instead of querying with invalid UUID
-    if (userId && (userId.startsWith('demo-') || !userId.match(/^[0-9a-f]{24}$/))) {
+    // For demo users or invalid ObjectId, return sample stats
+    if (!userId || userId.startsWith('demo-') || !mongoose.Types.ObjectId.isValid(userId)) {
       console.log('Demo user detected, returning sample stats for:', userId);
       stats = {
         total_complaints: 5,
@@ -609,15 +618,15 @@ const getComplaintStats = async (req, res) => {
     
     res.json({
       success: true,
-      data: {
-        totalComplaints: parseInt(stats.total_complaints || 0),
-        statusCounts: {
-          submitted: parseInt(stats.submitted_count || 0),
-          inProgress: parseInt(stats.in_progress_count || 0),
+      stats: {
+        total: parseInt(stats.total_complaints || 0),
+        status: {
+          pending: parseInt(stats.submitted_count || 0),
+          in_progress: parseInt(stats.in_progress_count || 0),
           resolved: parseInt(stats.resolved_count || 0),
           closed: parseInt(stats.closed_count || 0)
         },
-        priorityCounts: {
+        priority: {
           urgent: parseInt(stats.urgent_count || 0),
           high: parseInt(stats.high_priority_count || 0)
         },

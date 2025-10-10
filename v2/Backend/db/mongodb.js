@@ -25,13 +25,13 @@ const connectDB = async () => {
       console.log('🔌 MongoDB disconnected');
     });
 
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('🔄 Gracefully shutting down...');
-      await mongoose.connection.close();
-      console.log('✅ MongoDB connection closed');
-      process.exit(0);
-    });
+    // Graceful shutdown (temporarily disabled for debugging)
+    // process.on('SIGINT', async () => {
+    //   console.log('🔄 Gracefully shutting down...');
+    //   await mongoose.connection.close();
+    //   console.log('✅ MongoDB connection closed');
+    //   process.exit(0);
+    // });
 
   } catch (error) {
     console.error('❌ Error connecting to MongoDB:', error);

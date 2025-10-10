@@ -12,6 +12,14 @@ const api = axios.create({
 // Add token to requests if available
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
+    
+    // For anonymous complaint submission, don't add any token
+    if (config.url === '/complaints/anonymous') {
+        console.log('API Request - Anonymous complaint submission, no token needed');
+        delete config.headers.Authorization;
+        return config;
+    }
+    
     if (token) {
         // Debug: Log token info
         console.log('API Request - Token found:', {

@@ -157,20 +157,20 @@ app.use((req, res) => {
 // SERVER STARTUP
 // ================================
 
-// Graceful shutdown handlers
-process.on('SIGINT', async () => {
-  console.log('🔄 Gracefully shutting down...');
-  await mongoose.connection.close();
-  console.log('✅ Database connections closed');
-  process.exit(0);
-});
+// Graceful shutdown handlers (temporarily disabled for debugging)
+// process.on('SIGINT', async () => {
+//   console.log('🔄 Gracefully shutting down...');
+//   await mongoose.connection.close();
+//   console.log('✅ Database connections closed');
+//   process.exit(0);
+// });
 
-process.on('SIGTERM', async () => {
-  console.log('🔄 Received SIGTERM, gracefully shutting down...');
-  await mongoose.connection.close();
-  console.log('✅ Database connections closed');
-  process.exit(0);
-});
+// process.on('SIGTERM', async () => {
+//   console.log('🔄 Received SIGTERM, gracefully shutting down...');
+//   await mongoose.connection.close();
+//   console.log('✅ Database connections closed');
+//   process.exit(0);
+// });
 
 // Start server
 const PORT = process.env.PORT || 5000;
