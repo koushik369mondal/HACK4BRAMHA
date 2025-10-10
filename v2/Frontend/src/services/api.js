@@ -104,7 +104,7 @@ export const complaintAPI = {
     
     // Public tracking endpoints (no authentication required)
     trackComplaint: (complaintId) =>
-        api.get(`/track/${complaintId}`),
+        api.get(`/complaints/track/${complaintId}`),
     
     getRecentComplaints: (params = {}) =>
         api.get('/complaints/recent', { params }),

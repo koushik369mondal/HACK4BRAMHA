@@ -6,6 +6,12 @@ const complaintController = require('../controllers/complaintController');
 // Anonymous complaint submission (no authentication required)
 router.post('/anonymous', complaintController.createComplaint);
 
+// Public tracking endpoint (no authentication required)
+router.get('/track/:complaintId', complaintController.trackComplaint);
+
+// Public recent complaints endpoint (no authentication required)
+router.get('/recent', complaintController.getRecentComplaints);
+
 // Authenticated routes
 router.post('/', authenticateToken, complaintController.createComplaint);
 router.get('/my', authenticateToken, complaintController.getUserComplaints);

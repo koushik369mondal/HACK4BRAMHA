@@ -25,6 +25,17 @@ const createComplaint = async (req, res) => {
     // Generate complaint ID
     const complaintId = `CMP-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     
+    // Find department by name/category (optional)
+    let departmentId = null;
+    try {
+      const department = await Department.findOne({ name: category });
+      if (department) {
+        departmentId = department._id;
+      }
+    } catch (err) {
+      console.log('Department lookup failed, proceeding without department reference');
+    }
+    
     // Create complaint document
     const newComplaint = new Complaint({
       complaint_id: complaintId,
@@ -43,7 +54,7 @@ const createComplaint = async (req, res) => {
         formatted: location.formatted
       } : undefined,
       user_id: req.user?.id || null,
-      department: category, // Default department to category
+      department: departmentId, // ObjectId or null
       
       // Embedded documents
       aadhaar_data: (reporterType === 'verified' && aadhaarData) ? {
@@ -268,59 +279,22 @@ const getComplaintById = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Get main complaint data
-    const complaintQuery = `
-      SELECT c.*, d.name as department_name, d.contact_email as department_email
-      FROM complaints c
-      LEFT JOIN departments d ON c.department = d.name
-      WHERE c.id = $1 OR c.complaint_id = $1
-    `;
-    
-    const complaintResult = await pool.query(complaintQuery, [id]);
-    
-    if (complaintResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Complaint not found'
-      });
+    // Find complaint by ID or complaint_id
+    let complaint;
+    if (id.match(/^[0-9a-f]{24}$/i)) {
+      // MongoDB ObjectId
+      complaint = await Complaint.findById(id).populate('department');
+    } else {
+      // Custom complaint_id
+      complaint = await Complaint.findOne({ complaint_id: id }).populate('department');
     }
     
-    const complaint = complaintResult.rows[0];
-    
-    // Get attachments
-    const attachmentsQuery = `
-      SELECT id, filename, original_name, file_type, file_size, file_path, url, created_at
-      FROM complaint_attachments
-      WHERE complaint_id = $1
-      ORDER BY created_at ASC
-    `;
-    
-    const attachmentsResult = await pool.query(attachmentsQuery, [complaint.id]);
-    
-    // Get Aadhaar data if available
-    const aadhaarQuery = `
-      SELECT aadhaar_number, name, gender, state, district, verified_at
-      FROM complaint_aadhaar_data
-      WHERE complaint_id = $1
-    `;
-    
-    const aadhaarResult = await pool.query(aadhaarQuery, [complaint.id]);
-    
-    // Get status history
-    const historyQuery = `
-      SELECT 
-        csh.status, csh.notes, csh.changed_at,
-        u.full_name as changed_by_name
-      FROM complaint_status_history csh
-      LEFT JOIN users u ON csh.changed_by = u.id
-      WHERE csh.complaint_id = $1
-      ORDER BY csh.changed_at DESC
-    `;
-    
-    const historyResult = await pool.query(historyQuery, [complaint.id]);
+    if (!complaint) {
+      return res.status(404).json(errorResponse('Complaint not found'));
+    }
     
     const fullComplaint = {
-      id: complaint.id,
+      id: complaint._id,
       complaintId: complaint.complaint_id,
       title: complaint.title,
       category: complaint.category,
@@ -330,39 +304,29 @@ const getComplaintById = async (req, res) => {
       reporterType: complaint.reporter_type,
       contactMethod: complaint.contact_method,
       phone: complaint.phone,
-      location: {
-        address: complaint.location_address,
-        latitude: complaint.location_latitude,
-        longitude: complaint.location_longitude,
-        formatted: complaint.location_formatted
-      },
-      department: {
-        name: complaint.department,
-        displayName: complaint.department_name,
-        contactEmail: complaint.department_email
-      },
+      location: complaint.location,
+      department: complaint.department ? {
+        name: complaint.department.name,
+        displayName: complaint.department.name,
+        contactEmail: complaint.department.email
+      } : null,
       assignedTo: complaint.assigned_to,
       estimatedResolutionDate: complaint.estimated_resolution_date,
-      attachments: attachmentsResult.rows,
-      aadhaarData: aadhaarResult.rows.length > 0 ? aadhaarResult.rows[0] : null,
-      statusHistory: historyResult.rows,
-      createdAt: complaint.created_at,
-      updatedAt: complaint.updated_at,
+      attachments: complaint.attachments || [],
+      aadhaarData: complaint.aadhaar_data || null,
+      statusHistory: complaint.status_history || [],
+      createdAt: complaint.createdAt,
+      updatedAt: complaint.updatedAt,
       resolvedAt: complaint.resolved_at
     };
     
-    res.json({
-      success: true,
-      data: fullComplaint
-    });
+    res.json(successResponse(fullComplaint));
     
   } catch (error) {
     console.error('Error fetching complaint:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch complaint details',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    res.status(500).json(errorResponse(
+      process.env.NODE_ENV === 'development' ? error.message : 'Failed to fetch complaint details'
+    ));
   }
 };
 
@@ -498,8 +462,6 @@ const getUserComplaintStats = async (req, res) => {
 
 // Update complaint status (Admin only)
 const updateComplaintStatus = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
@@ -513,69 +475,57 @@ const updateComplaintStatus = async (req, res) => {
       });
     }
     
-    await client.query('BEGIN');
+    // Find and update complaint by complaint_id
+    const complaint = await Complaint.findOne({ complaint_id: id });
     
-    // Update complaint status
-    const updateQuery = `
-      UPDATE complaints 
-      SET status = $1, updated_at = NOW()
-      WHERE complaint_id = $2
-      RETURNING id, complaint_id, status, updated_at
-    `;
-
-    const result = await client.query(updateQuery, [status, id]);
-    
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
+    if (!complaint) {
       return res.status(404).json({
         success: false,
         message: 'Complaint not found'
       });
     }
     
-    const updatedComplaint = result.rows[0];
-    
-    // Add status history entry (skip for demo users to avoid UUID errors)
-    const userId = req.user?.id;
-    const isValidUuid = userId && userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-    
-    if (isValidUuid) {
-      const historyQuery = `
-        INSERT INTO complaint_status_history (
-          complaint_id, status, notes, changed_by, changed_at
-        ) VALUES ($1, $2, $3, $4, NOW())
-      `;
-      
-      await client.query(historyQuery, [
-        updatedComplaint.id,
-        status,
-        notes || `Status changed to ${status}`,
-        userId
-      ]);
+    // Update status and resolved_at if status is resolved
+    complaint.status = status;
+    if (status === 'resolved' && complaint.status !== 'resolved') {
+      complaint.resolved_at = new Date();
     }
     
-    await client.query('COMMIT');
+    // Add status history entry if status changed
+    if (complaint.status !== status) {
+      const historyEntry = {
+        status: status,
+        notes: notes || `Status changed to ${status}`,
+        changed_by: req.user?.id || null,
+        changed_at: new Date()
+      };
+      
+      if (!complaint.status_history) {
+        complaint.status_history = [];
+      }
+      complaint.status_history.push(historyEntry);
+    }
+    
+    await complaint.save();
     
     res.json({
       success: true,
       message: 'Complaint status updated successfully',
       data: {
-        complaintId: updatedComplaint.complaint_id,
-        status: updatedComplaint.status,
-        updatedAt: updatedComplaint.updated_at
+        complaintId: complaint.complaint_id,
+        status: complaint.status,
+        updatedAt: complaint.updatedAt,
+        resolvedAt: complaint.resolved_at
       }
     });
     
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Error updating complaint status:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update complaint status',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
-  } finally {
-    client.release();
   }
 };
 
@@ -685,11 +635,97 @@ const getComplaintStats = async (req, res) => {
   }
 };
 
+// Get recent complaints (public endpoint)
+const getRecentComplaints = async (req, res) => {
+  try {
+    const { limit = 10, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    
+    // Get recent complaints
+    const complaints = await Complaint.find()
+      .sort(sort)
+      .limit(parseInt(limit))
+      .populate('department', 'name')
+      .lean();
+    
+    res.json(successResponse({
+      complaints: complaints.map(complaint => ({
+        id: complaint._id,
+        complaint_id: complaint.complaint_id,
+        title: complaint.title,
+        category: complaint.category,
+        status: complaint.status,
+        priority: complaint.priority,
+        created_at: complaint.createdAt,
+        updated_at: complaint.updatedAt,
+        department: complaint.department?.name || null
+      }))
+    }));
+    
+  } catch (error) {
+    console.error('Error fetching recent complaints:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent complaints',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// Track complaint by complaint ID (public endpoint)
+const trackComplaint = async (req, res) => {
+  try {
+    const { complaintId } = req.params;
+    
+    // Find complaint by complaint_id (not _id)
+    const complaint = await Complaint.findOne({ complaint_id: complaintId })
+      .populate('department', 'name')
+      .lean();
+    
+    if (!complaint) {
+      return res.status(404).json({
+        success: false,
+        message: 'Complaint not found'
+      });
+    }
+    
+    // Return minimal tracking information
+    res.json(successResponse({
+      complaint: {
+        complaintId: complaint.complaint_id,
+        title: complaint.title,
+        category: complaint.category,
+        status: complaint.status,
+        priority: complaint.priority,
+        submittedAt: complaint.createdAt,
+        lastUpdated: complaint.updatedAt,
+        estimatedResolution: complaint.estimated_resolution_date,
+        resolvedAt: complaint.resolved_at,
+        department: complaint.department?.name || null,
+        statusHistory: complaint.status_history || []
+      }
+    }));
+    
+  } catch (error) {
+    console.error('Error tracking complaint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to track complaint',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   createComplaint,
   getUserComplaints,
   getComplaintById,
   updateComplaintStatus,
   getUserComplaintStats,
-  getComplaintStats
+  getComplaintStats,
+  getRecentComplaints,
+  trackComplaint
 };
