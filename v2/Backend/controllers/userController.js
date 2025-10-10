@@ -1,4 +1,4 @@
-const pool = require('../db');
+const { UserProfile } = require('../models');
 const { sanitizeUser, errorResponse, successResponse } = require('../utils/helpers');
 
 // Create user profile controller
@@ -7,23 +7,25 @@ const createProfileController = async (req, res) => {
     const { user_id, email, phone, name, avatar_url } = req.body;
 
     // Check if profile already exists
-    const existingProfile = await pool.query(
-      'SELECT * FROM user_profiles WHERE user_id = $1',
-      [user_id]
-    );
+    const existingProfile = await UserProfile.findOne({ user_id });
 
-    if (existingProfile.rows.length > 0) {
+    if (existingProfile) {
       return res.status(409).json(errorResponse('Profile already exists for this user'));
     }
 
     // Create new profile
-    const result = await pool.query(
-      'INSERT INTO user_profiles (user_id, email, phone, name, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [user_id, email, phone, name, avatar_url]
-    );
+    const newProfile = new UserProfile({
+      user_id,
+      email,
+      phone,
+      full_name: name,
+      avatar_url
+    });
+
+    await newProfile.save();
 
     res.status(201).json(successResponse({
-      profile: result.rows[0]
+      profile: newProfile.toObject()
     }, 'Profile created successfully'));
   } catch (error) {
     console.error('Profile creation error:', error);
@@ -46,14 +48,14 @@ const updateProfileController = async (req, res) => {
       // For demo users, return a success response but don't actually update anything
       const demoProfile = {
         user_id: userId,
-        name: fullName || req.user.name,
+        full_name: fullName || req.user.full_name,
         email: email || req.user.email,
         phone: phone || req.user.phone,
         avatar_url: '',
         role: req.user.role,
         is_verified: req.user.is_verified,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       
       return res.json(successResponse({
@@ -61,81 +63,31 @@ const updateProfileController = async (req, res) => {
       }, 'Demo profile updated successfully (simulated)'));
     }
 
-    // First check if profile exists
-    const existingProfile = await pool.query(
-      'SELECT * FROM user_profiles WHERE user_id = $1',
-      [userId]
-    );
+    // Find and update profile or create if doesn't exist
+    let profile = await UserProfile.findOne({ _id: userId });
 
-    if (existingProfile.rows.length === 0) {
+    if (!profile) {
       // Create new profile if doesn't exist
-      const createQuery = `
-        INSERT INTO user_profiles (user_id, name, email, phone) 
-        VALUES ($1, $2, $3, $4) 
-        RETURNING *
-      `;
-      const createValues = [userId, fullName || '', email || '', phone || ''];
-      const createResult = await pool.query(createQuery, createValues);
-      
-      return res.json(successResponse({
-        profile: createResult.rows[0]
-      }, 'Profile created successfully'));
+      profile = new UserProfile({
+        _id: userId,
+        full_name: fullName || '',
+        email: email || '',
+        phone: phone || '',
+        aadhaar_number: aadhaar || ''
+      });
+    } else {
+      // Update existing profile
+      if (fullName !== undefined) profile.full_name = fullName;
+      if (email !== undefined) profile.email = email;
+      if (phone !== undefined) profile.phone = phone;
+      if (aadhaar !== undefined) profile.aadhaar_number = aadhaar;
     }
 
-    // Build dynamic update query for existing profile
-    const updateFields = [];
-    const values = [];
-    let paramCount = 1;
-
-    if (fullName !== undefined) {
-      updateFields.push(`name = $${paramCount}`);
-      values.push(fullName);
-      paramCount++;
-    }
-
-    if (email !== undefined) {
-      updateFields.push(`email = $${paramCount}`);
-      values.push(email);
-      paramCount++;
-    }
-
-    if (phone !== undefined) {
-      updateFields.push(`phone = $${paramCount}`);
-      values.push(phone);
-      paramCount++;
-    }
-
-    // Add aadhaar field if provided (you may need to add this column to schema)
-    if (aadhaar !== undefined) {
-      // For now, we'll store it in a custom field or skip if column doesn't exist
-      // updateFields.push(`aadhaar = $${paramCount}`);
-      // values.push(aadhaar);
-      // paramCount++;
-    }
-
-    if (updateFields.length === 0) {
-      return res.status(400).json(errorResponse('No fields to update'));
-    }
-
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(userId);
-
-    const query = `
-      UPDATE user_profiles 
-      SET ${updateFields.join(', ')} 
-      WHERE user_id = $${paramCount} 
-      RETURNING *
-    `;
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json(errorResponse('User profile not found'));
-    }
+    await profile.save();
 
     res.json(successResponse({
-      profile: result.rows[0]
-    }, 'Profile updated successfully'));
+      profile: profile.toObject()
+    }, profile.isNew ? 'Profile created successfully' : 'Profile updated successfully'));
   } catch (error) {
     console.error('Profile update error:', error);
     res.status(500).json(errorResponse('Internal server error'));
@@ -154,14 +106,14 @@ const getProfileController = async (req, res) => {
       // Return demo user profile from req.user data
       const demoProfile = {
         user_id: req.user.id,
-        name: req.user.name,
+        full_name: req.user.full_name,
         email: req.user.email,
         phone: req.user.phone || '',
         avatar_url: '',
         role: req.user.role,
         is_verified: req.user.is_verified,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       
       return res.json(successResponse({
@@ -169,43 +121,37 @@ const getProfileController = async (req, res) => {
       }, 'Demo profile retrieved successfully'));
     }
     
-    let query;
-    let queryParams;
+    let profile;
     
     if (userId) {
       // Check if requested userId is a demo user
       if (userId.startsWith('demo-')) {
         return res.status(400).json(errorResponse('Demo user profiles cannot be accessed by ID'));
       }
-      query = 'SELECT * FROM user_profiles WHERE user_id = $1';
-      queryParams = [userId];
+      profile = await UserProfile.findOne({ _id: userId });
     } else if (email) {
-      query = 'SELECT * FROM user_profiles WHERE email = $1';
-      queryParams = [email];
+      profile = await UserProfile.findOne({ email });
     } else if (currentUserId) {
-      query = 'SELECT * FROM user_profiles WHERE user_id = $1';
-      queryParams = [currentUserId];
+      profile = await UserProfile.findOne({ _id: currentUserId });
     } else {
       return res.status(400).json(errorResponse('User ID or email is required'));
     }
-    
-    const result = await pool.query(query, queryParams);
 
-    if (result.rows.length === 0) {
+    if (!profile) {
       // Return empty profile structure instead of error
       return res.json(successResponse({
         profile: {
-          name: '',
+          full_name: '',
           email: email || '',
           phone: '',
           avatar_url: '',
-          // aadhaar: '' // Add when column exists
+          aadhaar_number: ''
         }
       }, 'No profile found, empty profile returned'));
     }
 
     res.json(successResponse({
-      profile: result.rows[0]
+      profile: profile.toObject()
     }, 'Profile retrieved successfully'));
   } catch (error) {
     console.error('Get profile error:', error);
@@ -228,14 +174,14 @@ const getCurrentProfileController = async (req, res) => {
       // Return demo user profile from req.user data
       const demoProfile = {
         user_id: req.user.id,
-        name: req.user.name,
+        full_name: req.user.full_name,
         email: req.user.email,
         phone: req.user.phone || '',
         avatar_url: '',
         role: req.user.role,
         is_verified: req.user.is_verified,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       
       return res.json(successResponse({
@@ -243,24 +189,19 @@ const getCurrentProfileController = async (req, res) => {
       }, 'Demo profile retrieved successfully'));
     }
     
-    let query;
-    let queryParams;
+    let profile;
     
     if (userId) {
-      query = 'SELECT * FROM user_profiles WHERE user_id = $1';
-      queryParams = [userId];
+      profile = await UserProfile.findOne({ _id: userId });
     } else {
-      query = 'SELECT * FROM user_profiles WHERE email = $1';
-      queryParams = [userEmail];
+      profile = await UserProfile.findOne({ email: userEmail });
     }
-    
-    const result = await pool.query(query, queryParams);
 
-    if (result.rows.length === 0) {
+    if (!profile) {
       // Return empty profile structure for frontend to populate
       return res.json(successResponse({
         profile: {
-          name: '',
+          full_name: '',
           email: userEmail || '',
           phone: '',
           avatar_url: ''
@@ -269,7 +210,7 @@ const getCurrentProfileController = async (req, res) => {
     }
 
     res.json(successResponse({
-      profile: result.rows[0]
+      profile: profile.toObject()
     }, 'Profile retrieved successfully'));
   } catch (error) {
     console.error('Get current profile error:', error);

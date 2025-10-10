@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const pool = require('../db');
+const { UserProfile } = require('../models');
 const { JWT_SECRET } = require('../utils/constants');
 const { errorResponse } = require('../utils/helpers');
 
@@ -46,16 +46,22 @@ const authenticateToken = async (req, res, next) => {
       }
 
       try {
-        const result = await pool.query(
-          'SELECT id, phone, name, is_verified, created_at, last_login FROM users WHERE phone = $1',
-          [decoded.phone]
-        );
+        // Find user by ID (JWT tokens contain userId field)
+        const user = await UserProfile.findById(decoded.userId);
 
-        if (result.rows.length === 0) {
+        if (!user) {
           return res.status(401).json(errorResponse('User not found'));
         }
 
-        req.user = result.rows[0];
+        req.user = {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          is_verified: user.is_verified,
+          createdAt: user.createdAt
+        };
         next();
       } catch (dbError) {
         console.error('Database error in auth middleware:', dbError);

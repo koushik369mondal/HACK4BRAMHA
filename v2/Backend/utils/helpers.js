@@ -17,11 +17,10 @@ const validateOTP = (otp) => {
 };
 
 // Generate JWT token
-const generateToken = (userId, phone) => {
+const generateToken = (userId) => {
   return jwt.sign(
     { 
-      userId, 
-      phone,
+      userId,
       timestamp: Date.now(),
       iat: Math.floor(Date.now() / 1000)
     },

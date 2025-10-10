@@ -12,5 +12,6 @@ router.get('/my', authenticateToken, complaintController.getUserComplaints);
 router.get('/:id', authenticateToken, complaintController.getComplaintById);
 router.put('/:id/status', authenticateToken, complaintController.updateComplaintStatus);
 router.get('/stats/my', authenticateToken, complaintController.getUserComplaintStats);
+router.get('/stats', authenticateToken, complaintController.getComplaintStats);
 
 module.exports = router;

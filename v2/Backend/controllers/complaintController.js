@@ -1,12 +1,9 @@
-const pool = require('../db');
+const { Complaint, UserProfile, Department } = require('../models');
+const { errorResponse, successResponse } = require('../utils/helpers');
 
 // Create a new complaint
 const createComplaint = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-    
     const {
       title,
       category,
@@ -22,130 +19,79 @@ const createComplaint = async (req, res) => {
     
     // Validate required fields
     if (!title || !category || !description) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title, category, and description are required'
-      });
+      return res.status(400).json(errorResponse('Title, category, and description are required'));
     }
     
     // Generate complaint ID
     const complaintId = `CMP-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     
-    // Insert main complaint record (using integer id that auto-increments)
-    const complaintQuery = `
-      INSERT INTO complaints (
-        complaint_id, title, category, description, priority, status, 
-        reporter_type, contact_method, phone,
-        location_address, location_latitude, location_longitude, location_formatted,
-        user_id, department,
-        created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
-      RETURNING id, complaint_id, created_at
-    `;
-    
-    const complaintValues = [
-      complaintId,
+    // Create complaint document
+    const newComplaint = new Complaint({
+      complaint_id: complaintId,
       title,
       category,
       description,
       priority,
-      'submitted',
-      reporterType,
-      contactMethod,
+      status: 'submitted',
+      reporter_type: reporterType,
+      contact_method: contactMethod,
       phone,
-      location?.address || null,
-      location?.latitude || null,
-      location?.longitude || null,
-      location?.formatted || null,
-      req.user?.id || null,
-      category // Default department to category
-    ];
-    
-    const complaintResult = await client.query(complaintQuery, complaintValues);
-    const newComplaint = complaintResult.rows[0];
-    
-    // Insert Aadhaar data if verified complaint
-    if (reporterType === 'verified' && aadhaarData) {
-      const aadhaarQuery = `
-        INSERT INTO complaint_aadhaar_data (
-          complaint_id, aadhaar_number, name, gender, state, district, verified_at, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-      `;
+      location: location ? {
+        address: location.address,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        formatted: location.formatted
+      } : undefined,
+      user_id: req.user?.id || null,
+      department: category, // Default department to category
       
-      await client.query(aadhaarQuery, [
-        newComplaint.id,
-        aadhaarData.aadhaarNumber,
-        aadhaarData.name,
-        aadhaarData.gender,
-        aadhaarData.state,
-        aadhaarData.district
-      ]);
-    }
+      // Embedded documents
+      aadhaar_data: (reporterType === 'verified' && aadhaarData) ? {
+        aadhaar_number: aadhaarData.aadhaarNumber,
+        name: aadhaarData.name,
+        gender: aadhaarData.gender,
+        state: aadhaarData.state,
+        district: aadhaarData.district,
+        verified_at: new Date()
+      } : undefined,
+      
+      attachments: attachments.map(attachment => ({
+        filename: attachment.filename,
+        original_name: attachment.originalName,
+        file_type: attachment.fileType,
+        file_size: attachment.fileSize,
+        file_path: attachment.filePath,
+        url: attachment.url
+      })),
+      
+      status_history: [{
+        status: 'submitted',
+        notes: 'Complaint submitted successfully',
+        changed_by: req.user?.id || null,
+        changed_at: new Date()
+      }]
+    });
     
-    // Insert attachments if any
-    if (attachments && attachments.length > 0) {
-      for (const attachment of attachments) {
-        const attachmentQuery = `
-          INSERT INTO complaint_attachments (
-            complaint_id, filename, original_name, file_type, file_size, file_path, url, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        `;
-        
-        await client.query(attachmentQuery, [
-          newComplaint.id,
-          attachment.filename,
-          attachment.originalName,
-          attachment.fileType,
-          attachment.fileSize,
-          attachment.filePath,
-          attachment.url
-        ]);
-      }
-    }
-    
-    // Insert initial status history
-    const statusHistoryQuery = `
-      INSERT INTO complaint_status_history (
-        complaint_id, status, notes, changed_by, changed_at
-      ) VALUES ($1, $2, $3, $4, NOW())
-    `;
-    
-    await client.query(statusHistoryQuery, [
-      newComplaint.id,
-      'submitted',
-      'Complaint submitted successfully',
-      req.user?.id || null
-    ]);
-    
-    await client.query('COMMIT');
+    await newComplaint.save();
     
     // Return success response
-    res.status(201).json({
-      success: true,
-      message: 'Complaint registered successfully',
-      data: {
-        complaintId: newComplaint.complaint_id,
-        id: newComplaint.id,
+    res.status(201).json(successResponse({
+      complaintId: newComplaint.complaint_id,
+      id: newComplaint._id,
+      status: 'submitted',
+      createdAt: newComplaint.createdAt,
+      tracking: {
+        complaintNumber: newComplaint.complaint_id,
         status: 'submitted',
-        createdAt: newComplaint.created_at,
-        tracking: {
-          complaintNumber: newComplaint.complaint_id,
-          status: 'submitted',
-          submittedAt: newComplaint.created_at
-        }
+        submittedAt: newComplaint.createdAt
       }
-    });
+    }, 'Complaint registered successfully'));
     
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Error creating complaint:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to register complaint',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  } finally {
-    client.release();
+    res.status(500).json(errorResponse(
+      process.env.NODE_ENV === 'development' ? error.message : 'Failed to register complaint'
+    ));
   }
 };
 
@@ -158,15 +104,15 @@ const getUserComplaints = async (req, res) => {
       status,
       category,
       priority,
-      sortBy = 'created_at',
-      sortOrder = 'DESC'
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
     } = req.query;
     
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     const userId = req.user?.id;
     
     // For demo users, return sample complaints instead of querying with invalid UUID
-    if (userId && (userId.startsWith('demo-') || !userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+    if (userId && (userId.startsWith('demo-') || !userId.match(/^[0-9a-f]{24}$/))) {
       console.log('Demo user detected, returning sample complaints for:', userId);
       
       // Sample complaints for demo users
@@ -230,116 +176,90 @@ const getUserComplaints = async (req, res) => {
       // Apply pagination
       const totalCount = filteredComplaints.length;
       const totalPages = Math.ceil(totalCount / parseInt(limit));
-      const paginatedComplaints = filteredComplaints.slice(offset, offset + parseInt(limit));
+      const paginatedComplaints = filteredComplaints.slice(skip, skip + parseInt(limit));
       
-      return res.json({
-        success: true,
-        data: {
-          complaints: paginatedComplaints,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages,
-            totalCount,
-            limit: parseInt(limit),
-            hasNextPage: parseInt(page) < totalPages,
-            hasPrevPage: parseInt(page) > 1
-          }
+      return res.json(successResponse({
+        complaints: paginatedComplaints,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalCount,
+          limit: parseInt(limit),
+          hasNextPage: parseInt(page) < totalPages,
+          hasPrevPage: parseInt(page) > 1
         }
-      });
+      }));
     }
     
-    // Build WHERE clause for real users
-    let whereClause = '1=1';
-    const queryParams = [];
-    let paramCounter = 1;
+    // Build query filter for real users
+    const filter = {};
     
     if (userId) {
-      whereClause += ` AND user_id = $${paramCounter}`;
-      queryParams.push(userId);
-      paramCounter++;
+      filter.user_id = userId;
     }
     
     if (status) {
-      whereClause += ` AND status = $${paramCounter}`;
-      queryParams.push(status);
-      paramCounter++;
+      filter.status = status;
     }
     
     if (category) {
-      whereClause += ` AND category = $${paramCounter}`;
-      queryParams.push(category);
-      paramCounter++;
+      filter.category = category;
     }
     
     if (priority) {
-      whereClause += ` AND priority = $${paramCounter}`;
-      queryParams.push(priority);
-      paramCounter++;
+      filter.priority = priority;
     }
     
-    // Add pagination params
-    queryParams.push(parseInt(limit), offset);
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
     
-    const query = `
-      SELECT 
-        c.*,
-        COUNT(*) OVER() as total_count
-      FROM complaints c
-      WHERE ${whereClause}
-      ORDER BY ${sortBy} ${sortOrder}
-      LIMIT $${paramCounter} OFFSET $${paramCounter + 1}
-    `;
+    // Get total count and complaints
+    const [totalCount, complaints] = await Promise.all([
+      Complaint.countDocuments(filter),
+      Complaint.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(parseInt(limit))
+    ]);
     
-    const result = await pool.query(query, queryParams);
-    
-    const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
     const totalPages = Math.ceil(totalCount / parseInt(limit));
     
-    res.json({
-      success: true,
-      data: {
-        complaints: result.rows.map(row => ({
-          id: row.id,
-          complaintId: row.complaint_id,
-          title: row.title,
-          category: row.category,
-          description: row.description,
-          status: row.status,
-          priority: row.priority,
-          reporterType: row.reporter_type,
-          contactMethod: row.contact_method,
-          phone: row.phone,
-          location: {
-            address: row.location_address,
-            latitude: row.location_latitude,
-            longitude: row.location_longitude,
-            formatted: row.location_formatted
-          },
-          department: row.department,
-          assignedTo: row.assigned_to,
-          estimatedResolutionDate: row.estimated_resolution_date,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-          resolvedAt: row.resolved_at
-        })),
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages,
-          totalCount,
-          hasNext: parseInt(page) < totalPages,
-          hasPrev: parseInt(page) > 1
-        }
+    res.json(successResponse({
+      complaints: complaints.map(complaint => ({
+        id: complaint._id,
+        complaintId: complaint.complaint_id,
+        title: complaint.title,
+        category: complaint.category,
+        description: complaint.description,
+        status: complaint.status,
+        priority: complaint.priority,
+        reporterType: complaint.reporter_type,
+        contactMethod: complaint.contact_method,
+        phone: complaint.phone,
+        location: complaint.location,
+        department: complaint.department,
+        assignedTo: complaint.assigned_to,
+        estimatedResolutionDate: complaint.estimated_resolution_date,
+        createdAt: complaint.createdAt,
+        updatedAt: complaint.updatedAt,
+        resolvedAt: complaint.resolved_at
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages,
+        totalCount,
+        hasNext: parseInt(page) < totalPages,
+        hasPrev: parseInt(page) > 1
       }
-    });
+    }));
     
   } catch (error) {
     console.error('Error fetching user complaints:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch complaints',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    res.status(500).json(errorResponse(
+      process.env.NODE_ENV === 'development' ? error.message : 'Failed to fetch complaints'
+    ));
   }
 };
 
@@ -450,105 +370,117 @@ const getComplaintById = async (req, res) => {
 const getUserComplaintStats = async (req, res) => {
   try {
     const userId = req.user?.id;
-    let result;
+    let stats;
     
     // For demo users, return sample stats instead of querying with invalid UUID
-    if (userId && (userId.startsWith('demo-') || !userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i))) {
+    if (userId && (userId.startsWith('demo-') || !userId.match(/^[0-9a-f]{24}$/))) {
       console.log('Demo user detected, returning sample stats for:', userId);
-      result = {
-        rows: [{
-          total_complaints: '5',
-          submitted_count: '1',
-          in_progress_count: '2',
-          resolved_count: '1',
-          closed_count: '1',
-          urgent_count: '1',
-          high_priority_count: '1',
-          avg_resolution_days: '3.5'
-        }]
+      stats = {
+        total_complaints: 5,
+        submitted_count: 1,
+        in_progress_count: 2,
+        resolved_count: 1,
+        closed_count: 1,
+        urgent_count: 1,
+        high_priority_count: 1,
+        avg_resolution_days: 3.5
       };
     } else {
       console.log('Querying real stats for user:', userId);
       
-      let statsQuery, queryParams;
-      
+      // Build match condition
+      let matchCondition = {};
       if (userId) {
-        // Query for specific user
-        statsQuery = `
-          SELECT 
-            COUNT(*) as total_complaints,
-            COUNT(CASE WHEN status = 'submitted' THEN 1 END) as submitted_count,
-            COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_count,
-            COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_count,
-            COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_count,
-            COUNT(CASE WHEN priority = 'urgent' THEN 1 END) as urgent_count,
-            COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority_count,
-            AVG(CASE WHEN resolved_at IS NOT NULL THEN 
-              EXTRACT(EPOCH FROM (resolved_at - created_at))/86400 
-            END) as avg_resolution_days
-          FROM complaints 
-          WHERE user_id = $1
-        `;
-        queryParams = [userId];
-      } else {
-        // Query for all complaints (admin view)
-        statsQuery = `
-          SELECT 
-            COUNT(*) as total_complaints,
-            COUNT(CASE WHEN status = 'submitted' THEN 1 END) as submitted_count,
-            COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_count,
-            COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_count,
-            COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_count,
-            COUNT(CASE WHEN priority = 'urgent' THEN 1 END) as urgent_count,
-            COUNT(CASE WHEN priority = 'high' THEN 1 END) as high_priority_count,
-            AVG(CASE WHEN resolved_at IS NOT NULL THEN 
-              EXTRACT(EPOCH FROM (resolved_at - created_at))/86400 
-            END) as avg_resolution_days
-          FROM complaints
-        `;
-        queryParams = [];
+        matchCondition.user_id = userId;
       }
       
-      result = await pool.query(statsQuery, queryParams);
-    }
-    
-    // Ensure result and result.rows exist
-    if (!result || !result.rows || result.rows.length === 0) {
-      console.log('No stats data found, returning empty stats');
-      return res.json({
-        success: true,
-        data: {
-          totalComplaints: 0,
-          statusCounts: {
-            submitted: 0,
-            inProgress: 0,
-            resolved: 0,
-            closed: 0
-          },
-          priorityCounts: {
-            urgent: 0,
-            high: 0
-          },
-          averageResolutionDays: null
+      // MongoDB aggregation pipeline for stats
+      const pipeline = [
+        { $match: matchCondition },
+        {
+          $group: {
+            _id: null,
+            total_complaints: { $sum: 1 },
+            submitted_count: {
+              $sum: { $cond: [{ $eq: ["$status", "submitted"] }, 1, 0] }
+            },
+            in_progress_count: {
+              $sum: { $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0] }
+            },
+            resolved_count: {
+              $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] }
+            },
+            closed_count: {
+              $sum: { $cond: [{ $eq: ["$status", "closed"] }, 1, 0] }
+            },
+            urgent_count: {
+              $sum: { $cond: [{ $eq: ["$priority", "urgent"] }, 1, 0] }
+            },
+            high_priority_count: {
+              $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] }
+            },
+            resolved_complaints: {
+              $push: {
+                $cond: [
+                  { $ne: ["$resolved_at", null] },
+                  {
+                    resolution_days: {
+                      $divide: [
+                        { $subtract: ["$resolved_at", "$created_at"] },
+                        86400000 // milliseconds in a day
+                      ]
+                    }
+                  },
+                  "$$REMOVE"
+                ]
+              }
+            }
+          }
+        },
+        {
+          $addFields: {
+            avg_resolution_days: {
+              $cond: [
+                { $gt: [{ $size: "$resolved_complaints" }, 0] },
+                { $avg: "$resolved_complaints.resolution_days" },
+                null
+              ]
+            }
+          }
         }
-      });
+      ];
+      
+      const result = await Complaint.aggregate(pipeline);
+      
+      if (result.length === 0) {
+        stats = {
+          total_complaints: 0,
+          submitted_count: 0,
+          in_progress_count: 0,
+          resolved_count: 0,
+          closed_count: 0,
+          urgent_count: 0,
+          high_priority_count: 0,
+          avg_resolution_days: null
+        };
+      } else {
+        stats = result[0];
+      }
     }
-    
-    const stats = result.rows[0];
     
     res.json({
       success: true,
       data: {
-        totalComplaints: parseInt(stats.total_complaints),
+        totalComplaints: parseInt(stats.total_complaints || 0),
         statusCounts: {
-          submitted: parseInt(stats.submitted_count),
-          inProgress: parseInt(stats.in_progress_count),
-          resolved: parseInt(stats.resolved_count),
-          closed: parseInt(stats.closed_count)
+          submitted: parseInt(stats.submitted_count || 0),
+          inProgress: parseInt(stats.in_progress_count || 0),
+          resolved: parseInt(stats.resolved_count || 0),
+          closed: parseInt(stats.closed_count || 0)
         },
         priorityCounts: {
-          urgent: parseInt(stats.urgent_count),
-          high: parseInt(stats.high_priority_count)
+          urgent: parseInt(stats.urgent_count || 0),
+          high: parseInt(stats.high_priority_count || 0)
         },
         averageResolutionDays: stats.avg_resolution_days ? parseFloat(stats.avg_resolution_days).toFixed(1) : null
       }
@@ -647,10 +579,117 @@ const updateComplaintStatus = async (req, res) => {
   }
 };
 
+// Get global complaint stats (all complaints)
+const getComplaintStats = async (req, res) => {
+  try {
+    console.log('Querying global complaint stats');
+    
+    // MongoDB aggregation pipeline for global stats
+    const pipeline = [
+      {
+        $group: {
+          _id: null,
+          total_complaints: { $sum: 1 },
+          submitted_count: {
+            $sum: { $cond: [{ $eq: ["$status", "submitted"] }, 1, 0] }
+          },
+          in_progress_count: {
+            $sum: { $cond: [{ $eq: ["$status", "in_progress"] }, 1, 0] }
+          },
+          resolved_count: {
+            $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] }
+          },
+          closed_count: {
+            $sum: { $cond: [{ $eq: ["$status", "closed"] }, 1, 0] }
+          },
+          urgent_count: {
+            $sum: { $cond: [{ $eq: ["$priority", "urgent"] }, 1, 0] }
+          },
+          high_priority_count: {
+            $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] }
+          },
+          resolved_complaints: {
+            $push: {
+              $cond: [
+                { $ne: ["$resolved_at", null] },
+                {
+                  resolution_days: {
+                    $divide: [
+                      { $subtract: ["$resolved_at", "$created_at"] },
+                      86400000 // milliseconds in a day
+                    ]
+                  }
+                },
+                "$$REMOVE"
+              ]
+            }
+          }
+        }
+      },
+      {
+        $addFields: {
+          avg_resolution_days: {
+            $cond: [
+              { $gt: [{ $size: "$resolved_complaints" }, 0] },
+              { $avg: "$resolved_complaints.resolution_days" },
+              null
+            ]
+          }
+        }
+      }
+    ];
+    
+    const result = await Complaint.aggregate(pipeline);
+    
+    let stats;
+    if (result.length === 0) {
+      stats = {
+        total_complaints: 0,
+        submitted_count: 0,
+        in_progress_count: 0,
+        resolved_count: 0,
+        closed_count: 0,
+        urgent_count: 0,
+        high_priority_count: 0,
+        avg_resolution_days: null
+      };
+    } else {
+      stats = result[0];
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        totalComplaints: parseInt(stats.total_complaints || 0),
+        statusCounts: {
+          submitted: parseInt(stats.submitted_count || 0),
+          inProgress: parseInt(stats.in_progress_count || 0),
+          resolved: parseInt(stats.resolved_count || 0),
+          closed: parseInt(stats.closed_count || 0)
+        },
+        priorityCounts: {
+          urgent: parseInt(stats.urgent_count || 0),
+          high: parseInt(stats.high_priority_count || 0)
+        },
+        averageResolutionDays: stats.avg_resolution_days ? parseFloat(stats.avg_resolution_days).toFixed(1) : null
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching global complaint stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch complaint statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   createComplaint,
   getUserComplaints,
   getComplaintById,
   updateComplaintStatus,
-  getUserComplaintStats
+  getUserComplaintStats,
+  getComplaintStats
 };

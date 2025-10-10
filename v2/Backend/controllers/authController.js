@@ -1,4 +1,4 @@
-const pool = require('../db');
+const { UserProfile, OtpCode } = require('../models');
 const bcrypt = require('bcrypt');
 const { generateOTP, generateToken, sanitizeUser, errorResponse, successResponse } = require('../utils/helpers');
 const { OTP_EXPIRY_MINUTES, OTP_MAX_ATTEMPTS } = require('../utils/constants');
@@ -16,141 +16,112 @@ const sendOTP = async (phoneNumber, otp) => {
 
 // Send OTP controller
 const sendOTPController = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-    
     const { phoneNumber } = req.body;
 
-    // Create user if doesn't exist
-    await client.query(
-      `INSERT INTO users (phone) VALUES ($1) 
-       ON CONFLICT (phone) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
-      [phoneNumber]
-    );
-
     // Delete any existing unused OTPs
-    await client.query(
-      'DELETE FROM otp_codes WHERE phone = $1 AND (is_used = false OR otp_expiry < NOW())',
-      [phoneNumber]
-    );
+    await OtpCode.deleteMany({
+      phone: phoneNumber,
+      $or: [
+        { is_used: false },
+        { otp_expiry: { $lt: new Date() } }
+      ]
+    });
 
     // Generate and store new OTP
     const otp = generateOTP();
     const expiryTime = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-    await client.query(
-      'INSERT INTO otp_codes (phone, otp, otp_expiry) VALUES ($1, $2, $3)',
-      [phoneNumber, otp, expiryTime]
-    );
+    await OtpCode.create({
+      phone: phoneNumber,
+      otp_code: otp,
+      otp_expiry: expiryTime,
+      purpose: 'verification'
+    });
 
     // Send OTP
     const smsResult = await sendOTP(phoneNumber, otp);
 
     if (smsResult.success) {
-      await client.query('COMMIT');
       res.json(successResponse(
         { expiresIn: OTP_EXPIRY_MINUTES * 60 },
         'OTP sent successfully'
       ));
     } else {
-      await client.query('ROLLBACK');
       res.status(500).json(errorResponse('Failed to send OTP'));
     }
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Send OTP error:', error);
     res.status(500).json(errorResponse('Internal server error'));
-  } finally {
-    client.release();
   }
 };
 
 // Verify OTP controller
 const verifyOTPController = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-    
     const { phoneNumber, otp } = req.body;
 
     // Get latest OTP record
-    const otpResult = await client.query(
-      `SELECT * FROM otp_codes 
-       WHERE phone = $1 AND is_used = false 
-       ORDER BY created_at DESC LIMIT 1`,
-      [phoneNumber]
-    );
+    const otpRecord = await OtpCode.findOne({
+      phone: phoneNumber,
+      is_used: false
+    }).sort({ createdAt: -1 });
 
-    if (otpResult.rows.length === 0) {
-      return res.status(400).json(errorResponse('OTP not found or expired. Please request a new one.'));
+    if (!otpRecord) {
+      return res.status(400).json(errorResponse('No valid OTP found for this phone number'));
     }
 
-    const otpRecord = otpResult.rows[0];
-
-    // Check expiry
-    if (new Date() > otpRecord.otp_expiry) {
-      await client.query('DELETE FROM otp_codes WHERE id = $1', [otpRecord.id]);
-      await client.query('COMMIT');
-      return res.status(400).json(errorResponse('OTP has expired. Please request a new one.'));
+    // Check if OTP has expired
+    if (otpRecord.otp_expiry < new Date()) {
+      await OtpCode.deleteOne({ _id: otpRecord._id });
+      return res.status(400).json(errorResponse('OTP has expired'));
     }
 
-    // Check attempts
+    // Check if too many attempts
     if (otpRecord.attempts >= OTP_MAX_ATTEMPTS) {
-      await client.query('DELETE FROM otp_codes WHERE id = $1', [otpRecord.id]);
-      await client.query('COMMIT');
-      return res.status(400).json(errorResponse('Too many invalid attempts. Please request a new OTP.'));
+      await OtpCode.deleteOne({ _id: otpRecord._id });
+      return res.status(400).json(errorResponse('Too many OTP attempts. Please request a new OTP'));
     }
 
     // Verify OTP
-    if (otpRecord.otp !== otp) {
-      await client.query(
-        'UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1',
-        [otpRecord.id]
-      );
-      await client.query('COMMIT');
+    if (otpRecord.otp_code !== otp) {
+      await OtpCode.findByIdAndUpdate(otpRecord._id, {
+        $inc: { attempts: 1 }
+      });
       
+      const remainingAttempts = OTP_MAX_ATTEMPTS - (otpRecord.attempts + 1);
       return res.status(400).json(errorResponse(
-        `Invalid OTP. ${OTP_MAX_ATTEMPTS - (otpRecord.attempts + 1)} attempts remaining.`
+        `Invalid OTP. ${remainingAttempts} attempts remaining`
       ));
     }
 
-    // OTP is valid - mark as used
-    await client.query(
-      'UPDATE otp_codes SET is_used = true WHERE id = $1',
-      [otpRecord.id]
-    );
+    // Mark OTP as used
+    await OtpCode.findByIdAndUpdate(otpRecord._id, { is_used: true });
 
-    // Update user
-    const userResult = await client.query(
-      `UPDATE users 
-       SET is_verified = true, last_login = CURRENT_TIMESTAMP 
-       WHERE phone = $1 
-       RETURNING id, phone, name, is_verified, created_at`,
-      [phoneNumber]
-    );
+    // Find or create user
+    let user = await UserProfile.findOne({ phone: phoneNumber });
+    
+    if (!user) {
+      user = await UserProfile.create({
+        phone: phoneNumber,
+        email: `${phoneNumber}@temp.local`, // Temporary email
+        name: `User ${phoneNumber}`,
+        password: 'otp-verified', // Placeholder password for OTP users
+        role: 'customer'
+      });
+    }
 
-    const user = userResult.rows[0];
-    const token = generateToken(user.id, phoneNumber);
-
-    await client.query('COMMIT');
+    // Generate JWT token
+    const token = generateToken(user._id);
 
     res.json(successResponse({
       token,
-      user: {
-        ...sanitizeUser(user),
-        isNewUser: !user.name
-      }
-    }, 'Login successful'));
+      user: sanitizeUser(user.toObject())
+    }, 'OTP verified successfully'));
 
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Verify OTP error:', error);
     res.status(500).json(errorResponse('Internal server error'));
-  } finally {
-    client.release();
   }
 };
 
@@ -168,16 +139,12 @@ const validateTokenController = async (req, res) => {
 
 // Email/Password Registration
 const registerController = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-    
-    const { fullName, email, phone, password } = req.body;
+    const { name, email, phone, password } = req.body;
 
     // Validate required fields
-    if (!fullName || !email || !password) {
-      return res.status(400).json(errorResponse('Full name, email, and password are required'));
+    if (!name || !email || !password) {
+      return res.status(400).json(errorResponse('Name, email, and password are required'));
     }
 
     // Validate email format
@@ -192,12 +159,11 @@ const registerController = async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await client.query(
-      'SELECT id FROM users WHERE email = $1 OR phone = $2',
-      [email, phone]
-    );
+    const existingUser = await UserProfile.findOne({
+      $or: [{ email }, { phone: phone || '' }]
+    });
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
       return res.status(400).json(errorResponse('User with this email or phone already exists'));
     }
 
@@ -206,36 +172,35 @@ const registerController = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
-    const userResult = await client.query(
-      `INSERT INTO users (full_name, email, phone, password, is_verified, role) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, full_name, email, phone, role, is_verified, created_at`,
-      [fullName, email, phone, hashedPassword, true, 'customer'] // Set as verified for now
-    );
+    const user = await UserProfile.create({
+      name,
+      email,
+      phone: phone || '',
+      password: hashedPassword,
+      is_verified: true, // Set as verified for now
+      role: 'customer'
+    });
 
-    const user = userResult.rows[0];
-    const token = generateToken(user.id, user.email);
-
-    await client.query('COMMIT');
+    const token = generateToken(user._id);
 
     res.status(201).json(successResponse({
       token,
-      user: sanitizeUser(user)
+      user: sanitizeUser(user.toObject())
     }, 'Registration successful'));
 
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Registration error:', error);
+    if (error.code === 11000) {
+      // MongoDB duplicate key error
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json(errorResponse(`${field} already exists`));
+    }
     res.status(500).json(errorResponse('Internal server error'));
-  } finally {
-    client.release();
   }
 };
 
 // Email/Password Login
 const loginController = async (req, res) => {
-  const client = await pool.connect();
-  
   try {
     const { email, password } = req.body;
 
@@ -245,16 +210,11 @@ const loginController = async (req, res) => {
     }
 
     // Find user
-    const userResult = await client.query(
-      'SELECT id, full_name, email, phone, password, role, is_verified FROM users WHERE email = $1',
-      [email]
-    );
+    const user = await UserProfile.findOne({ email });
 
-    if (userResult.rows.length === 0) {
+    if (!user) {
       return res.status(400).json(errorResponse('Invalid email or password'));
     }
-
-    const user = userResult.rows[0];
 
     // Check if user is verified
     if (!user.is_verified) {
@@ -267,24 +227,20 @@ const loginController = async (req, res) => {
       return res.status(400).json(errorResponse('Invalid email or password'));
     }
 
-    // Update last login
-    await client.query(
-      'UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [user.id]
-    );
+    // Update last login (using updatedAt field)
+    user.updatedAt = new Date();
+    await user.save();
 
-    const token = generateToken(user.id, user.email);
+    const token = generateToken(user._id);
 
     res.json(successResponse({
       token,
-      user: sanitizeUser(user)
+      user: sanitizeUser(user.toObject())
     }, 'Login successful'));
 
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json(errorResponse('Internal server error'));
-  } finally {
-    client.release();
   }
 };
 
