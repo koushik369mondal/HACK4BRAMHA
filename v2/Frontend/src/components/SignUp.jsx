@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { FaEye, FaEyeSlash, FaUser, FaLock, FaPhone, FaIdCard } from "react-icons/fa";
-import { supabaseAuth } from "../services/supabase";
+import { authService } from "../services/auth";
 import { userProfileAPI } from "../services/api";
 
 export default function SignUp({ onSignUpSuccess, onSwitchToSignIn }) {
@@ -69,8 +69,8 @@ export default function SignUp({ onSignUpSuccess, onSwitchToSignIn }) {
     }
 
     try {
-      // Sign up with Supabase Auth
-      const { data, error } = await supabaseAuth.signUp(
+      // Sign up with backend API
+      const { data, error } = await authService.signUp(
         formData.email.trim().toLowerCase(),
         formData.password,
         {
@@ -80,12 +80,8 @@ export default function SignUp({ onSignUpSuccess, onSwitchToSignIn }) {
       );
       
       if (error) {
-        // Handle specific Supabase error messages
-        if (error.message.includes('already registered')) {
-          setError('An account with this email already exists. Please sign in instead.');
-        } else if (error.message.includes('User already registered')) {
-          setError('An account with this email already exists. Please sign in instead.');
-        } else if (error.message.includes('already been registered')) {
+        // Handle specific error messages
+        if (error.message.includes('already exists') || error.message.includes('already registered')) {
           setError('An account with this email already exists. Please sign in instead.');
         } else {
           setError(error.message);
@@ -95,30 +91,20 @@ export default function SignUp({ onSignUpSuccess, onSwitchToSignIn }) {
       }
 
       if (data.user) {
-        // Create user profile in our user_profiles table
-        const profileData = {
-          user_id: data.user.id,
-          email: data.user.email,
-          name: formData.fullName.trim(),
-          phone: formData.phone.trim(),
-          avatar_url: null
-        };
-
-        try {
-          await userProfileAPI.createProfile(profileData);
-        } catch (profileError) {
-          console.error("Profile creation error:", profileError);
-          // Don't block signup if profile creation fails
+        // Store authentication data
+        if (data.session?.access_token) {
+          localStorage.setItem('token', data.session.access_token);
+          localStorage.setItem('user', JSON.stringify(data.user));
         }
 
         // Prepare user data for the app
         const userData = {
           id: data.user.id,
           email: data.user.email,
-          name: formData.fullName.trim(),
-          role: 'customer',
-          phone: formData.phone.trim(),
-          is_verified: data.user.email_confirmed_at ? true : false
+          name: data.user.name || formData.fullName.trim(),
+          role: data.user.role || 'customer',
+          phone: data.user.phone || formData.phone.trim(),
+          is_verified: data.user.is_verified || false
         };
 
         // Show success message

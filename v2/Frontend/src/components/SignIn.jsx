@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { FaEye, FaEyeSlash, FaUser, FaLock } from "react-icons/fa";
-import { supabaseAuth } from "../services/supabase";
+import { authService } from "../services/auth";
 import { userProfileAPI } from "../services/api";
 
 // Demo users for fallback authentication
@@ -56,14 +56,14 @@ export default function SignIn({ onLoginSuccess, onSwitchToSignUp }) {
         return;
       }
 
-      // If not a demo user, try Supabase authentication
-      const { data, error } = await supabaseAuth.signIn(email.trim().toLowerCase(), password);
+      // If not a demo user, try backend authentication
+      const { data, error } = await authService.signIn(email.trim().toLowerCase(), password);
       
       if (error) {
         // Handle specific error messages
-        if (error.message.includes('Email not confirmed')) {
-          setError("Please check your email and click the confirmation link before signing in. Check your spam folder if you don't see it.");
-        } else if (error.message.includes('Invalid login credentials')) {
+        if (error.message.includes('not confirmed') || error.message.includes('not verified')) {
+          setError("Please verify your email before signing in. Check your email for a verification link.");
+        } else if (error.message.includes('Invalid') || error.message.includes('credentials')) {
           setError("Invalid email or password. Please check your credentials and try again.");
         } else {
           setError(error.message || "Invalid credentials — please check your email and password and try again.");
@@ -73,39 +73,21 @@ export default function SignIn({ onLoginSuccess, onSwitchToSignUp }) {
       }
 
       if (data.user) {
-        // Check if email is confirmed
-        if (!data.user.email_confirmed_at) {
-          setError("Please check your email and click the confirmation link before signing in. Check your spam folder if you don't see it.");
-          setIsLoading(false);
-          return;
+        // Store authentication data
+        if (data.session?.access_token) {
+          localStorage.setItem('token', data.session.access_token);
+          localStorage.setItem('user', JSON.stringify(data.user));
         }
 
-        // Get user profile from our user_profiles table
-        let userData;
-        try {
-          const profileResponse = await userProfileAPI.getProfile(data.user.id);
-          const profile = profileResponse.profile;
-          
-          userData = {
-            id: data.user.id,
-            email: data.user.email,
-            name: profile?.name || data.user.user_metadata?.full_name || data.user.email,
-            role: profile?.role || 'customer',
-            phone: profile?.phone || data.user.user_metadata?.phone || '',
-            is_verified: profile?.is_verified || data.user.email_confirmed_at ? true : false
-          };
-        } catch (profileError) {
-          console.error("Profile fetch error:", profileError);
-          // Create basic user data if profile doesn't exist
-          userData = {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.user_metadata?.full_name || data.user.email,
-            role: 'customer',
-            phone: data.user.user_metadata?.phone || '',
-            is_verified: data.user.email_confirmed_at ? true : false
-          };
-        }
+        // Prepare user data for the app
+        const userData = {
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name || data.user.email,
+          role: data.user.role || 'customer',
+          phone: data.user.phone || '',
+          is_verified: data.user.is_verified || false
+        };
 
         // Store user data for the session
         localStorage.setItem('user', JSON.stringify(userData));
