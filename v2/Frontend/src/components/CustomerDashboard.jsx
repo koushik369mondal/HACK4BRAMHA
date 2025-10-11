@@ -70,22 +70,26 @@ export default function CustomerDashboard({
       setLoading(true);
       setError(null);
 
-      // Fetch recent complaints
+      // Fetch recent complaints (limited for display)
       const complaintsResponse = await complaintAPI.getRecentComplaints({ limit: 5 });
+      
+      // Fetch all complaints to get actual total count
+      const allComplaintsResponse = await complaintAPI.getRecentComplaints({ limit: 1000 }); // Large limit to get all
 
       if (complaintsResponse.data && complaintsResponse.data.success) {
         const complaintsData = complaintsResponse.data.complaints || [];
+        const allComplaintsData = allComplaintsResponse.data?.complaints || [];
 
-        // Calculate stats from the complaints data
+        // Calculate stats from ALL complaints data for accurate totals
         const calculatedStats = {
-          total: complaintsData.length,
+          total: allComplaintsData.length, // Use all complaints for total
           pending: 0,
           inProgress: 0,
           resolved: 0
         };
 
-        // Count status occurrences
-        complaintsData.forEach(complaint => {
+        // Count status occurrences from all complaints
+        allComplaintsData.forEach(complaint => {
           switch (complaint.status) {
             case 'submitted':
               calculatedStats.pending++;
@@ -102,10 +106,10 @@ export default function CustomerDashboard({
           }
         });
 
-        // Update stats
+        // Update stats with accurate totals
         setStats(calculatedStats);
 
-        // Format complaints data
+        // Format recent complaints data for display (limited to 5)
         const formattedComplaints = complaintsData.map(complaint => ({
           id: complaint.complaint_id,
           title: complaint.title,
@@ -115,7 +119,7 @@ export default function CustomerDashboard({
 
         setComplaints(formattedComplaints);
 
-        // Generate notifications from complaints
+        // Generate notifications from recent complaints only
         generateNotifications(complaintsData);
       } else {
         // If no data, set empty states

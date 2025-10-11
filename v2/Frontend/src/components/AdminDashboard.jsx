@@ -41,22 +41,26 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
       setLoading(true);
       setError(null);
 
-      // Use the same working endpoint as Tracking.jsx - getRecentComplaints
+      // Fetch recent complaints for display (limited to 10)
       const response = await complaintAPI.getRecentComplaints({ limit: 10 });
+      
+      // Fetch all complaints to get actual total count
+      const allComplaintsResponse = await complaintAPI.getRecentComplaints({ limit: 1000 }); // Large limit to get all
 
       if (response.data && response.data.success) {
         const complaintsData = response.data.complaints || [];
+        const allComplaintsData = allComplaintsResponse.data?.complaints || [];
 
-        // Calculate statistics from the complaints data
+        // Calculate statistics from ALL complaints data for accurate totals
         const calculatedStats = {
-          total: complaintsData.length,
+          total: allComplaintsData.length, // Use all complaints for total
           pending: 0,
           inProgress: 0,
           resolved: 0
         };
 
-        // Count status occurrences
-        complaintsData.forEach(complaint => {
+        // Count status occurrences from all complaints
+        allComplaintsData.forEach(complaint => {
           switch (complaint.status) {
             case 'submitted':
               calculatedStats.pending++;
@@ -73,7 +77,7 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
           }
         });
 
-        // Update stats with calculated values
+        // Update stats with calculated values from all complaints
         const updatedStats = [
           {
             label: "Total Complaints",
@@ -107,7 +111,7 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
 
         setStats(updatedStats);
 
-        // Format complaints data with complete information
+        // Format recent complaints data for display (limited to 10)
         const formattedComplaints = complaintsData.map(complaint => ({
           id: complaint.complaint_id,
           complaintId: complaint.complaint_id,
