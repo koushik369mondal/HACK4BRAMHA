@@ -2,9 +2,7 @@ import React, { useMemo } from "react";
 import {
   FaHome,
   FaFileAlt,
-  FaChartBar,
   FaInfoCircle,
-  FaComments,
   FaIdCard,
   FaUser,
   FaSignOutAlt,
@@ -46,7 +44,6 @@ export default function Sidebar({
     return user?.role === "admin" ? adminItems : customerItems;
   }, [user?.role]);
 
-  // Fixed: Using the correct variable name
   const handleNavigation = (pageId) => {
     setCurrentPage(pageId);
     setSidebarOpen(false); // Close sidebar on mobile after selection
@@ -109,7 +106,7 @@ export default function Sidebar({
         } lg:translate-x-0`}
       aria-label="Sidebar navigation"
     >
-      {/* Header - Enhanced Responsive */}
+      {/* Header */}
       <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-gray-200">
         <div className="flex items-center justify-between lg:justify-start">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -149,7 +146,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* User Profile Section */}
+      {/* User Profile Section - FIXED: Removed duplicate icon */}
       {user && (
         <div className="px-4 py-4 bg-gradient-to-r from-emerald-50 to-blue-50 border-b border-gray-200">
           <button
@@ -163,12 +160,12 @@ export default function Sidebar({
               </div>
               <div className="text-xs text-gray-600">{displayRole()}</div>
             </div>
-            <FaUser className="text-gray-400 group-hover:text-emerald-600 transition-colors" />
+            {/* Removed the FaUser icon here to fix duplicate icon issue */}
           </button>
         </div>
       )}
 
-      {/* Navigation Menu - FIXED */}
+      {/* Navigation Menu */}
       <div className="flex-1 px-3 sm:px-4 py-4 sm:py-6 overflow-y-auto">
         <nav>
           <ul className="space-y-2 sm:space-y-3">
@@ -177,20 +174,17 @@ export default function Sidebar({
               return (
                 <li key={id}>
                   <button
-                    onClick={() => {
-                      if (setCurrentPage) setCurrentPage(id);
-                      if (sidebarOpen && setSidebarOpen) setSidebarOpen(false);
-                    }}
+                    onClick={() => handleNavigation(id)}
                     className={`flex items-center w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg font-medium transition-all duration-200 group ${active
-                      ? "bg-emerald-600 text-white shadow-md transform scale-105"
-                      : "text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 hover:transform hover:scale-102"
+                        ? "bg-emerald-600 text-white shadow-md transform scale-105"
+                        : "text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 hover:transform hover:scale-102"
                       }`}
                     aria-current={active ? "page" : undefined}
                   >
                     <Icon
                       className={`text-base sm:text-lg mr-3 sm:mr-4 transition-colors duration-200 flex-shrink-0 ${active
-                        ? "text-white"
-                        : "text-gray-600 group-hover:text-emerald-600"
+                          ? "text-white"
+                          : "text-gray-600 group-hover:text-emerald-600"
                         }`}
                     />
                     <span className="text-sm font-medium truncate">{label}</span>
@@ -205,7 +199,7 @@ export default function Sidebar({
         </nav>
       </div>
 
-      {/* Bottom Section - Enhanced */}
+      {/* Bottom Section */}
       <div className="px-3 sm:px-4 pb-4">
         {user && (
           <button
