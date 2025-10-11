@@ -359,8 +359,8 @@ export default function AdminDashboard({ user, sidebarOpen, setSidebarOpen, onLo
               disabled={loading}
               className="flex items-center bg-white bg-opacity-20 px-3 py-2 rounded-lg hover:bg-opacity-30 transition-all"
             >
-              <FaChartLine className={`mr-2 text-white ${loading ? 'animate-pulse' : ''}`} />
-              <span className="text-sm text-white font-medium">
+              <FaChartLine className={`mr-2 text-black ${loading ? 'animate-pulse' : ''}`} />
+              <span className="text-sm text-black font-medium">
                 {loading ? 'Refreshing...' : 'Refresh Data'}
               </span>
             </button>

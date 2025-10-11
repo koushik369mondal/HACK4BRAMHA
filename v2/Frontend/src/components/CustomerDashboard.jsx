@@ -199,14 +199,14 @@ export default function CustomerDashboard({
               disabled={loading}
               className="flex items-center bg-white bg-opacity-20 px-3 py-2 rounded-lg hover:bg-opacity-30 transition-all"
             >
-              <FaSync className={`mr-2 text-white ${loading ? 'animate-spin' : ''}`} />
-              <span className="text-sm text-white font-medium">
+              <FaSync className={`mr-2 text-black ${loading ? 'animate-spin' : ''}`} />
+              <span className="text-sm text-black font-medium">
                 {loading ? 'Refreshing...' : 'Refresh'}
               </span>
             </button>
             <div className="flex items-center bg-white bg-opacity-20 px-4 py-2 rounded-lg">
-              <FaBell className="mr-2 animate-pulse text-white" />
-              <span className="text-sm text-white font-medium">
+              <FaBell className="mr-2 animate-pulse text-black" />
+              <span className="text-sm text-black font-medium">
                 {stats.total} total complaints
               </span>
             </div>
