@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: naiyaksetu-backend
+    env: node
+    plan: free
+    buildCommand: yarn install --production=false
+    startCommand: node app.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DB_USER
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_URL
+        sync: false
+      - key: FRONTEND_URL
+        value: https://your-frontend-domain.vercel.app
