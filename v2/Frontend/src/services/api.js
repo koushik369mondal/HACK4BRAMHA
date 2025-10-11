@@ -2,11 +2,19 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+console.log('🔗 API Configuration:', {
+    baseURL: API_BASE_URL,
+    environment: import.meta.env.NODE_ENV || 'development',
+    mode: import.meta.env.MODE || 'development'
+});
+
 const api = axios.create({
     baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json'
-    }
+    },
+    timeout: 30000, // 30 second timeout
+    withCredentials: false // Set to false for CORS issues
 });
 
 // Add token to requests if available
@@ -39,7 +47,41 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Add response interceptor to handle auth errors
+// Add response interceptor to handle auth errors and network issues
+api.interceptors.response.use(
+    (response) => {
+        console.log('✅ API Response Success:', {
+            url: response.config.url,
+            status: response.status,
+            data: response.data
+        });
+        return response;
+    },
+    (error) => {
+        console.error('❌ API Response Error:', {
+            url: error.config?.url,
+            status: error.response?.status,
+            message: error.message,
+            data: error.response?.data,
+            isNetworkError: !error.response,
+            baseURL: error.config?.baseURL
+        });
+        
+        // Handle network errors specifically
+        if (!error.response) {
+            console.error('🌐 Network Error - Check if backend is accessible:', API_BASE_URL);
+        }
+        
+        // Handle 401 errors
+        if (error.response?.status === 401) {
+            console.log('🔐 Authentication error - clearing token');
+            localStorage.removeItem('token');
+            // Optional: redirect to login
+        }
+        
+        return Promise.reject(error);
+    }
+);
 api.interceptors.response.use(
     (response) => {
         console.log('API Response - Success:', response.status, response.config.url);

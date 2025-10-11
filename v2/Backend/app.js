@@ -20,7 +20,12 @@ const app = express();
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5174",
+  origin: [
+    process.env.FRONTEND_URL || "http://localhost:5174",
+    "https://hack-4-bramha-f.vercel.app",
+    "https://hack-4-bramha-f.vercel.app/",
+    /\.vercel\.app$/
+  ],
   credentials: true
 }));
 
