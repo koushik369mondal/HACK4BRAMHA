@@ -186,12 +186,14 @@ function App() {
             <p className="text-green-600">Connecting Citizens with Solutions</p>
           </div>
           
-          <div className="relative">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-200"></div>
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-600 border-t-transparent absolute top-0"></div>
+          <div className="flex items-center justify-center mb-4">
+            <div className="relative">
+              <div className="animate-spin rounded-full h-16 w-16 border-4 border-green-200"></div>
+              <div className="animate-spin rounded-full h-16 w-16 border-4 border-green-600 border-t-transparent absolute top-0 left-0"></div>
+            </div>
           </div>
           
-          <p className="text-sm text-gray-500 mt-4">Loading your dashboard...</p>
+          <p className="text-sm text-gray-500 mt-4 animate-pulse">Loading your dashboard...</p>
         </div>
       </div>
     );
